@@ -1,0 +1,26 @@
+[package]
+name = "moenarch-video-analysis-dataset-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Command-line adapter for the video-analysis-dataset library crate."
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+default-run = "video-analysis-dataset-cli"
+
+[lib]
+name = "video_analysis_dataset_cli"
+
+[[bin]]
+name = "video-analysis-dataset-cli"
+path = "src/main.rs"
+
+[dependencies]
+runtime-core.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+video-analysis-dataset = { package = "moenarch-video-analysis-dataset", version = "0.1.0", path = "../video-analysis-dataset" }

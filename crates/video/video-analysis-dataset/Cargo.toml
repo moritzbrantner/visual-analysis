@@ -1,0 +1,26 @@
+[package]
+name = "moenarch-video-analysis-dataset"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Serializable retained analysis records for video-analysis."
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "video_analysis_dataset"
+
+[dependencies]
+runtime-core.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+video-analysis-core.workspace = true
+
+[dev-dependencies]
+num-rational.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,13 @@
+schema_version = 1
+profile_status = "draft"
+project_id = "moritzbrantner/visual-analysis"
+default_base_ref = "origin/main"
+maturity = "growing"
+project_kinds = ["library", "cli", "application", "native-processing"]
+verification_surface_globs = [".harness/**", ".github/workflows/**", ".agent-loop.toml", "Cargo.toml", "package.json", "scripts/**", "docs/repository-split/**"]
+generated_path_globs = ["target/**", "packages/*/dist/**", "packages/*-wasm/pkg/**"]
+selection_fallback_ids = []
+required_external_sources = []
+
+[required_risk_categories]
+migration = ["INV-001", "INV-002"]

@@ -1,0 +1,37 @@
+[package]
+name = "moenarch-video-analysis-ffmpeg"
+version = "0.1.1"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "FFmpeg-backed media ingest for video-analysis."
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "video_analysis_ffmpeg"
+
+[features]
+default = ["ffmpeg-command"]
+ffmpeg-command = []
+ffmpeg-native = []
+ffmpeg-next-bindings = ["ffmpeg-native"]
+ffmpeg-backend = []
+ffmpeg-tests = ["ffmpeg-backend", "test-utils"]
+external-tests = ["ffmpeg-tests"]
+test-utils = []
+
+[dependencies]
+runtime-core.workspace = true
+serde_json.workspace = true
+num-rational.workspace = true
+thiserror.workspace = true
+video-analysis-core.workspace = true
+video-analysis-ingest.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

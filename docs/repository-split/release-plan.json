@@ -1,0 +1,562 @@
+{
+  "blockers": [
+    {
+      "package": "moenarch-audio-contracts",
+      "reason": "exact registry version is absent",
+      "version": "0.1.0"
+    },
+    {
+      "package": "scenedetect-core",
+      "reason": "accepted canonical scene contract is not registry-visible",
+      "version": "0.1.0"
+    }
+  ],
+  "package_count": 108,
+  "packages": [
+    {
+      "manifest_path": "crates/image/image-analysis-captioning/Cargo.toml",
+      "name": "moenarch-image-analysis-captioning",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-captioning-cli/Cargo.toml",
+      "name": "moenarch-image-analysis-captioning-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-captioning-server/Cargo.toml",
+      "name": "moenarch-image-analysis-captioning-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/image-analysis-captioning-wasm/Cargo.toml",
+      "name": "moenarch-image-analysis-captioning-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-classification/Cargo.toml",
+      "name": "moenarch-image-analysis-classification",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-classification-cli/Cargo.toml",
+      "name": "moenarch-image-analysis-classification-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-classification-server/Cargo.toml",
+      "name": "moenarch-image-analysis-classification-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/image-analysis-classification-wasm/Cargo.toml",
+      "name": "moenarch-image-analysis-classification-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-core/Cargo.toml",
+      "name": "moenarch-image-analysis-core",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-core-cli/Cargo.toml",
+      "name": "moenarch-image-analysis-core-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-core-server/Cargo.toml",
+      "name": "moenarch-image-analysis-core-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/image-analysis-core-wasm/Cargo.toml",
+      "name": "moenarch-image-analysis-core-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-detection/Cargo.toml",
+      "name": "moenarch-image-analysis-detection",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-detection-cli/Cargo.toml",
+      "name": "moenarch-image-analysis-detection-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-detection-server/Cargo.toml",
+      "name": "moenarch-image-analysis-detection-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/image-analysis-detection-wasm/Cargo.toml",
+      "name": "moenarch-image-analysis-detection-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-embeddings/Cargo.toml",
+      "name": "moenarch-image-analysis-embeddings",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-embeddings-cli/Cargo.toml",
+      "name": "moenarch-image-analysis-embeddings-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-embeddings-server/Cargo.toml",
+      "name": "moenarch-image-analysis-embeddings-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/image-analysis-embeddings-wasm/Cargo.toml",
+      "name": "moenarch-image-analysis-embeddings-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-io/Cargo.toml",
+      "name": "moenarch-image-analysis-io",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-io-cli/Cargo.toml",
+      "name": "moenarch-image-analysis-io-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-io-server/Cargo.toml",
+      "name": "moenarch-image-analysis-io-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/image-analysis-io-wasm/Cargo.toml",
+      "name": "moenarch-image-analysis-io-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-ocr/Cargo.toml",
+      "name": "moenarch-image-analysis-ocr",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-ocr-cli/Cargo.toml",
+      "name": "moenarch-image-analysis-ocr-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-ocr-server/Cargo.toml",
+      "name": "moenarch-image-analysis-ocr-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/image-analysis-ocr-wasm/Cargo.toml",
+      "name": "moenarch-image-analysis-ocr-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-processing/Cargo.toml",
+      "name": "moenarch-image-analysis-processing",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-processing-cli/Cargo.toml",
+      "name": "moenarch-image-analysis-processing-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-processing-server/Cargo.toml",
+      "name": "moenarch-image-analysis-processing-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/image-analysis-processing-wasm/Cargo.toml",
+      "name": "moenarch-image-analysis-processing-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-segmentation/Cargo.toml",
+      "name": "moenarch-image-analysis-segmentation",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-segmentation-cli/Cargo.toml",
+      "name": "moenarch-image-analysis-segmentation-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-segmentation-server/Cargo.toml",
+      "name": "moenarch-image-analysis-segmentation-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/image-analysis-segmentation-wasm/Cargo.toml",
+      "name": "moenarch-image-analysis-segmentation-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-synthesis/Cargo.toml",
+      "name": "moenarch-image-analysis-synthesis",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-synthesis-cli/Cargo.toml",
+      "name": "moenarch-image-analysis-synthesis-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/image/image-analysis-synthesis-server/Cargo.toml",
+      "name": "moenarch-image-analysis-synthesis-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/image-analysis-synthesis-wasm/Cargo.toml",
+      "name": "moenarch-image-analysis-synthesis-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-core/Cargo.toml",
+      "name": "moenarch-video-analysis-core",
+      "source_version": "0.1.3"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-core-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-core-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-core-server/Cargo.toml",
+      "name": "moenarch-video-analysis-core-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-core-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-core-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-data/Cargo.toml",
+      "name": "moenarch-video-analysis-data",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-data-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-data-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-data-server/Cargo.toml",
+      "name": "moenarch-video-analysis-data-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-data-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-data-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-dataset/Cargo.toml",
+      "name": "moenarch-video-analysis-dataset",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-dataset-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-dataset-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-dataset-server/Cargo.toml",
+      "name": "moenarch-video-analysis-dataset-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-dataset-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-dataset-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-detectors/Cargo.toml",
+      "name": "moenarch-video-analysis-detectors",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-detectors-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-detectors-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-detectors-server/Cargo.toml",
+      "name": "moenarch-video-analysis-detectors-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-detectors-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-detectors-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-editing/Cargo.toml",
+      "name": "moenarch-video-analysis-editing",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-editing-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-editing-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-editing-server/Cargo.toml",
+      "name": "moenarch-video-analysis-editing-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-editing-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-editing-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-features/Cargo.toml",
+      "name": "moenarch-video-analysis-features",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-features-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-features-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-features-server/Cargo.toml",
+      "name": "moenarch-video-analysis-features-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-features-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-features-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-ffmpeg/Cargo.toml",
+      "name": "moenarch-video-analysis-ffmpeg",
+      "source_version": "0.1.1"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-ffmpeg-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-ffmpeg-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-ffmpeg-server/Cargo.toml",
+      "name": "moenarch-video-analysis-ffmpeg-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-ffmpeg-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-ffmpeg-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-ingest/Cargo.toml",
+      "name": "moenarch-video-analysis-ingest",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-ingest-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-ingest-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-ingest-server/Cargo.toml",
+      "name": "moenarch-video-analysis-ingest-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-ingest-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-ingest-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-output/Cargo.toml",
+      "name": "moenarch-video-analysis-output",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-output-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-output-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-output-server/Cargo.toml",
+      "name": "moenarch-video-analysis-output-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-output-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-output-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-recognition/Cargo.toml",
+      "name": "moenarch-video-analysis-recognition",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-recognition-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-recognition-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-recognition-server/Cargo.toml",
+      "name": "moenarch-video-analysis-recognition-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-recognition-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-recognition-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-segmentation/Cargo.toml",
+      "name": "moenarch-video-analysis-segmentation",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-segmentation-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-segmentation-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-segmentation-server/Cargo.toml",
+      "name": "moenarch-video-analysis-segmentation-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-segmentation-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-segmentation-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-split/Cargo.toml",
+      "name": "moenarch-video-analysis-split",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-split-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-split-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-split-server/Cargo.toml",
+      "name": "moenarch-video-analysis-split-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-split-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-split-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-storage/Cargo.toml",
+      "name": "moenarch-video-analysis-storage",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-storage-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-storage-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-storage-server/Cargo.toml",
+      "name": "moenarch-video-analysis-storage-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-storage-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-storage-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-synthesis/Cargo.toml",
+      "name": "moenarch-video-analysis-synthesis",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-synthesis-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-synthesis-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-synthesis-server/Cargo.toml",
+      "name": "moenarch-video-analysis-synthesis-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-synthesis-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-synthesis-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-tracking/Cargo.toml",
+      "name": "moenarch-video-analysis-tracking",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-tracking-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-tracking-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-tracking-server/Cargo.toml",
+      "name": "moenarch-video-analysis-tracking-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-tracking-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-tracking-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-transform/Cargo.toml",
+      "name": "moenarch-video-analysis-transform",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-transform-cli/Cargo.toml",
+      "name": "moenarch-video-analysis-transform-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-transform-server/Cargo.toml",
+      "name": "moenarch-video-analysis-transform-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/video-analysis-transform-wasm/Cargo.toml",
+      "name": "moenarch-video-analysis-transform-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/vision/vision-core/Cargo.toml",
+      "name": "moenarch-vision-core",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/vision/vision-core-cli/Cargo.toml",
+      "name": "moenarch-vision-core-cli",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/vision/vision-core-server/Cargo.toml",
+      "name": "moenarch-vision-core-server",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/bindings/vision-core-wasm/Cargo.toml",
+      "name": "moenarch-vision-core-wasm",
+      "source_version": "0.1.0"
+    }
+  ],
+  "publication_authorized": false,
+  "repository": "moritzbrantner/visual-analysis",
+  "schema_version": 1,
+  "source_commit": "b8b29cf8db0b86ed1b133a18155adf24992f9483",
+  "status": "blocked-prerequisites"
+}

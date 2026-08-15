@@ -1,0 +1,22 @@
+[package]
+name = "moenarch-video-analysis-ingest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Media ingest traits and source adapters for video-analysis."
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "video_analysis_ingest"
+
+[dependencies]
+runtime-core.workspace = true
+serde_json.workspace = true
+num-rational.workspace = true
+video-analysis-core.workspace = true

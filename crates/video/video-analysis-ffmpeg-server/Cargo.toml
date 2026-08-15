@@ -1,0 +1,26 @@
+[package]
+name = "moenarch-video-analysis-ffmpeg-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "HTTP API adapter for the video-analysis-ffmpeg library crate."
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+default-run = "video-analysis-ffmpeg-server"
+
+[lib]
+name = "video_analysis_ffmpeg_server"
+
+[[bin]]
+name = "video-analysis-ffmpeg-server"
+path = "src/main.rs"
+
+[dependencies]
+runtime-core.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+video-analysis-ffmpeg = { package = "moenarch-video-analysis-ffmpeg", version = "0.1.0", path = "../video-analysis-ffmpeg" }

@@ -1,0 +1,27 @@
+[package]
+name = "moenarch-video-analysis-transform"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Filtering, joins, grouping, and resampling for video-analysis datasets."
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "video_analysis_transform"
+
+[dependencies]
+runtime-core.workspace = true
+video-analysis-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+video-analysis-dataset.workspace = true
+
+[dev-dependencies]
+num-rational.workspace = true
+video-analysis-core.workspace = true

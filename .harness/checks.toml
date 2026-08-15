@@ -1,0 +1,40 @@
+schema_version = 1
+
+[[checks]]
+id = "visual-structural"
+command = ["bun", "run", "structural:check"]
+scope = ["Cargo.toml", "crates/**", "packages/**", "scripts/**", "docs/repository-split/**"]
+tier = "full"
+blocking = true
+evidence_classes = ["static", "contract"]
+protected_properties = ["INV-001", "INV-002", "INV-003"]
+source_of_truth = ["issue:#2"]
+state_class = "deterministic"
+timeout_seconds = 120
+tools = ["bun", "python3"]
+services = []
+generated_outputs = []
+cost_class = "low"
+success_exit_codes = [0]
+failure_semantics = "The frozen inventory, ownership boundary, exact dependency coordinates, or byte-identity record differs."
+always_select = true
+independence_group = "visual-structure"
+
+[[checks]]
+id = "cargo-metadata"
+command = ["cargo", "metadata", "--format-version", "1", "--no-deps"]
+scope = ["Cargo.toml", "crates/**/Cargo.toml"]
+tier = "full"
+blocking = true
+evidence_classes = ["static"]
+protected_properties = ["INV-001", "INV-002"]
+source_of_truth = ["issue:#2"]
+state_class = "deterministic"
+timeout_seconds = 120
+tools = ["cargo"]
+services = []
+generated_outputs = []
+cost_class = "low"
+success_exit_codes = [0]
+failure_semantics = "The selected workspace manifests do not form a resolvable metadata graph."
+independence_group = "cargo-metadata"

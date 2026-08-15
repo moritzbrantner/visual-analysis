@@ -1,0 +1,3 @@
+schema_version = 1
+
+# No retries, skips, or quarantines are approved.
