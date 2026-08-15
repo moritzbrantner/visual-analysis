@@ -27,10 +27,15 @@ claim workspace, unit, integration, consumer, WASM, clippy, docs, build,
 package, or benchmark suites for this bootstrap. Run only:
 
 ```bash
-git diff --check
-python3 scripts/check_visual_extraction.py --check
+git diff --check c5d6b02a708837cf01ee6e033faa41b0a667b38b..HEAD
+python3 scripts/check_visual_extraction.py --check  # authoritative; registry prerequisites fail closed
 cargo metadata --format-version 1 --no-deps  # only when blockers resolve
 ```
+
+For focused extraction iteration, `bun run structural:prepare` checks the
+static inventory without querying the registry. It is not an authoritative
+gate and cannot make the bootstrap ready while either exact registry
+prerequisite is absent.
 
 The `.harness/` profile is draft and non-authoritative. Activation and any
 later behavioral gate policy require an explicit maintainer decision.

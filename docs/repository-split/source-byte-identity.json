@@ -1,6 +1,6 @@
 {
-  "adapted_count": 139,
-  "byte_identical_count": 772,
+  "adapted_count": 140,
+  "byte_identical_count": 771,
   "file_count": 911,
   "files": [
     {
@@ -1696,7 +1696,7 @@
     {
       "path": "crates/video/video-analysis-output/README.md",
       "source_sha256": "f3c7ffde6f500ac9a8068660ab87ed3a46d7a24c724e50d73a401313dc8e2872",
-      "status": "byte-identical"
+      "status": "adapted"
     },
     {
       "path": "crates/video/video-analysis-output/src/lib.rs",

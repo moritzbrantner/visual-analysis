@@ -9,6 +9,8 @@ import json
 import re
 import sys
 import tomllib
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +29,10 @@ EXPECTED_EXTERNAL = {
     "tensor-data": ("moenarch-tensor-data", "=0.1.1"),
     "text-core": ("moenarch-text-core", "=0.1.1"),
 }
+REQUIRED_REGISTRY_PACKAGES = (
+    ("moenarch-audio-contracts", "0.1.0"),
+    ("scenedetect-core", "0.1.0"),
+)
 FORBIDDEN_DEPENDENCIES = {
     "three-d-processing-core",
     "video-analysis-posture",
@@ -58,6 +64,50 @@ def dependency_tables(document: dict):
         if isinstance(target, dict):
             for section in ("dependencies", "dev-dependencies", "build-dependencies"):
                 yield target.get(section, {})
+
+
+def registry_errors() -> list[str]:
+    """Fail closed unless every exact bootstrap prerequisite is registry-visible."""
+
+    errors: list[str] = []
+    for package, version in REQUIRED_REGISTRY_PACKAGES:
+        request = urllib.request.Request(
+            f"https://crates.io/api/v1/crates/{package}/{version}",
+            headers={
+                "Accept": "application/json",
+                "User-Agent": (
+                    "visual-analysis-structural-gate/0.1 "
+                    "(https://github.com/moritzbrantner/visual-analysis)"
+                ),
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                document = json.load(response)
+        except urllib.error.HTTPError as error:
+            if error.code == 404:
+                errors.append(f"required registry package absent: {package}={version}")
+            else:
+                errors.append(
+                    f"required registry package unverifiable: {package}={version} "
+                    f"(HTTP {error.code})"
+                )
+            continue
+        except (OSError, ValueError) as error:
+            errors.append(
+                f"required registry package unverifiable: {package}={version} "
+                f"({type(error).__name__})"
+            )
+            continue
+
+        crate_version = document.get("version", {})
+        if crate_version.get("num") != version:
+            errors.append(
+                f"required registry package returned wrong version: {package}={version}"
+            )
+        elif crate_version.get("yanked") is True:
+            errors.append(f"required registry package is yanked: {package}={version}")
+    return errors
 
 
 def validate() -> list[str]:
@@ -120,10 +170,12 @@ def validate() -> list[str]:
         if dependencies.get("@moritzbrantner/visual-app-ui") != "workspace:*":
             errors.append(f"{manifest.relative_to(ROOT)} does not use visual-app-ui")
     stale_ui = []
-    for path in (ROOT / "packages").rglob("*"):
-        if path.is_file() and path.suffix in {".json", ".ts", ".tsx"}:
-            if "@moritzbrantner/video-analysis-ui" in path.read_text(errors="ignore"):
-                stale_ui.append(str(path.relative_to(ROOT)))
+    stale_ui_roots = (ROOT / "crates", ROOT / "docs", ROOT / "packages")
+    for search_root in stale_ui_roots:
+        for path in search_root.rglob("*"):
+            if path.is_file() and path.suffix in {".json", ".md", ".toml", ".ts", ".tsx"}:
+                if "@moritzbrantner/video-analysis-ui" in path.read_text(errors="ignore"):
+                    stale_ui.append(str(path.relative_to(ROOT)))
     if stale_ui:
         errors.append("rust-packages UI dependency remains: " + ", ".join(stale_ui))
 
@@ -195,13 +247,26 @@ def validate() -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
-    parser.parse_args()
+    parser.add_argument(
+        "--preparation-only",
+        action="store_true",
+        help="run static extraction checks without asserting registry readiness",
+    )
+    args = parser.parse_args()
     errors = validate()
+    if not args.preparation_only:
+        errors.extend(registry_errors())
     if errors:
         for error in errors:
             print(f"error: {error}", file=sys.stderr)
         return 1
-    print("visual extraction structural checks passed")
+    if args.preparation_only:
+        print(
+            "visual extraction preparation checks passed; "
+            "authoritative registry gate was not evaluated"
+        )
+    else:
+        print("visual extraction authoritative structural checks passed")
     return 0
 
 

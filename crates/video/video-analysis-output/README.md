@@ -54,4 +54,4 @@ external-tool execution.
 
 - `video-analysis-core`
 - `video-analysis-features`
-- `@moritzbrantner/video-analysis-ui`
+- `@moritzbrantner/visual-app-ui`

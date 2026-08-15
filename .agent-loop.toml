@@ -4,7 +4,7 @@ max_workers = 2
 [verification]
 # Issue #2 intentionally authorizes structural checks only.
 commands = [
-  "git diff --check",
+  "git diff --check c5d6b02a708837cf01ee6e033faa41b0a667b38b..HEAD",
   "python3 scripts/check_visual_extraction.py --check",
   "cargo metadata --format-version 1 --no-deps",
 ]
