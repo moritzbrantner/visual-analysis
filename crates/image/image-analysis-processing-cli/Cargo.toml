@@ -1,0 +1,26 @@
+[package]
+name = "moenarch-image-analysis-processing-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Command-line adapter for the image-analysis-processing library crate."
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+default-run = "image-analysis-processing-cli"
+
+[lib]
+name = "image_analysis_processing_cli"
+
+[[bin]]
+name = "image-analysis-processing-cli"
+path = "src/main.rs"
+
+[dependencies]
+runtime-core.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+image-analysis-processing = { package = "moenarch-image-analysis-processing", version = "0.1.0", path = "../image-analysis-processing" }

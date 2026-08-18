@@ -1,0 +1,20 @@
+name: Structural extraction
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  structural:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: git diff --check c5d6b02a708837cf01ee6e033faa41b0a667b38b..HEAD
+      - run: python3 scripts/check_visual_extraction.py --check
+      - run: cargo metadata --format-version 1 --no-deps > /dev/null

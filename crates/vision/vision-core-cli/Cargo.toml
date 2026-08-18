@@ -1,0 +1,26 @@
+[package]
+name = "moenarch-vision-core-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Command-line adapter for the vision-core library crate."
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+default-run = "vision-core-cli"
+
+[lib]
+name = "vision_core_cli"
+
+[[bin]]
+name = "vision-core-cli"
+path = "src/main.rs"
+
+[dependencies]
+runtime-core.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+vision-core = { package = "moenarch-vision-core", version = "0.1.0", path = "../vision-core" }

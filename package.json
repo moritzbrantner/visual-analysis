@@ -1,0 +1,13 @@
+{
+  "name": "@moritzbrantner/visual-analysis-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "structural:prepare": "python3 scripts/check_visual_extraction.py --check --preparation-only",
+    "structural:check": "python3 scripts/check_visual_extraction.py --check"
+  }
+}

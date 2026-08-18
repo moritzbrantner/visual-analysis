@@ -1,0 +1,75 @@
+[workspace]
+members = [
+    "crates/image/*",
+    "crates/video/*",
+    "crates/vision/*",
+    "crates/bindings/*-wasm",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.95"
+repository = "https://github.com/moritzbrantner/visual-analysis"
+homepage = "https://github.com/moritzbrantner/visual-analysis"
+documentation = "https://docs.rs/moenarch-visual-analysis"
+keywords = ["video", "image", "vision", "analysis", "computer-vision"]
+categories = ["multimedia", "computer-vision", "science", "algorithms"]
+
+[workspace.dependencies]
+base64 = "0.22.1"
+clap = { version = "4.5.51", features = ["derive"] }
+criterion = "0.5.1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+num-rational = "0.4.2"
+num-traits = "0.2.19"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+tempfile = "3.23.0"
+thiserror = "2.0.17"
+tokenizers = { version = "0.22.2", default-features = false, features = ["unstable_wasm"] }
+
+# Exact registry-only dependencies owned by earlier extraction waves. Missing
+# packages remain explicit blockers; sibling paths and Git fallbacks are forbidden.
+audio-contracts = { package = "moenarch-audio-contracts", version = "=0.1.0" }
+data-inversion-core = { package = "moenarch-data-inversion-core", version = "=0.1.1" }
+math-geometry-2d = { package = "moenarch-math-geometry-2d", version = "=0.1.1" }
+math-linear = { package = "moenarch-math-linear", version = "=0.1.1" }
+media-core = { package = "moenarch-media-core", version = "=0.1.0" }
+model-runtime = { package = "moenarch-model-runtime", version = "=0.1.1" }
+numbers-core = { package = "moenarch-numbers-core", version = "=0.1.1" }
+runtime-core = { package = "moenarch-runtime-core", version = "=0.2.1" }
+runtime-onnx = { package = "moenarch-runtime-onnx", version = "=0.1.1" }
+scenedetect-core = { version = "=0.1.0" }
+tensor-data = { package = "moenarch-tensor-data", version = "=0.1.1" }
+text-core = { package = "moenarch-text-core", version = "=0.1.1" }
+
+image-analysis-captioning = { package = "moenarch-image-analysis-captioning", version = "=0.1.0", path = "crates/image/image-analysis-captioning" }
+image-analysis-classification = { package = "moenarch-image-analysis-classification", version = "=0.1.0", path = "crates/image/image-analysis-classification" }
+image-analysis-core = { package = "moenarch-image-analysis-core", version = "=0.1.0", path = "crates/image/image-analysis-core" }
+image-analysis-detection = { package = "moenarch-image-analysis-detection", version = "=0.1.0", path = "crates/image/image-analysis-detection" }
+image-analysis-embeddings = { package = "moenarch-image-analysis-embeddings", version = "=0.1.0", path = "crates/image/image-analysis-embeddings" }
+image-analysis-io = { package = "moenarch-image-analysis-io", version = "=0.1.0", path = "crates/image/image-analysis-io" }
+image-analysis-ocr = { package = "moenarch-image-analysis-ocr", version = "=0.1.0", path = "crates/image/image-analysis-ocr" }
+image-analysis-processing = { package = "moenarch-image-analysis-processing", version = "=0.1.0", path = "crates/image/image-analysis-processing" }
+image-analysis-segmentation = { package = "moenarch-image-analysis-segmentation", version = "=0.1.0", path = "crates/image/image-analysis-segmentation" }
+image-analysis-synthesis = { package = "moenarch-image-analysis-synthesis", version = "=0.1.0", path = "crates/image/image-analysis-synthesis" }
+video-analysis-core = { package = "moenarch-video-analysis-core", version = "=0.1.3", path = "crates/video/video-analysis-core" }
+video-analysis-data = { package = "moenarch-video-analysis-data", version = "=0.1.0", path = "crates/video/video-analysis-data" }
+video-analysis-dataset = { package = "moenarch-video-analysis-dataset", version = "=0.1.0", path = "crates/video/video-analysis-dataset" }
+video-analysis-detectors = { package = "moenarch-video-analysis-detectors", version = "=0.1.0", path = "crates/video/video-analysis-detectors" }
+video-analysis-editing = { package = "moenarch-video-analysis-editing", version = "=0.1.0", path = "crates/video/video-analysis-editing" }
+video-analysis-features = { package = "moenarch-video-analysis-features", version = "=0.1.0", path = "crates/video/video-analysis-features" }
+video-analysis-ffmpeg = { package = "moenarch-video-analysis-ffmpeg", version = "=0.1.1", path = "crates/video/video-analysis-ffmpeg" }
+video-analysis-ingest = { package = "moenarch-video-analysis-ingest", version = "=0.1.0", path = "crates/video/video-analysis-ingest" }
+video-analysis-output = { package = "moenarch-video-analysis-output", version = "=0.1.0", path = "crates/video/video-analysis-output" }
+video-analysis-recognition = { package = "moenarch-video-analysis-recognition", version = "=0.1.0", path = "crates/video/video-analysis-recognition" }
+video-analysis-segmentation = { package = "moenarch-video-analysis-segmentation", version = "=0.1.0", path = "crates/video/video-analysis-segmentation" }
+video-analysis-split = { package = "moenarch-video-analysis-split", version = "=0.1.0", path = "crates/video/video-analysis-split" }
+video-analysis-storage = { package = "moenarch-video-analysis-storage", version = "=0.1.0", path = "crates/video/video-analysis-storage" }
+video-analysis-synthesis = { package = "moenarch-video-analysis-synthesis", version = "=0.1.0", path = "crates/video/video-analysis-synthesis" }
+video-analysis-tracking = { package = "moenarch-video-analysis-tracking", version = "=0.1.0", path = "crates/video/video-analysis-tracking" }
+video-analysis-transform = { package = "moenarch-video-analysis-transform", version = "=0.1.0", path = "crates/video/video-analysis-transform" }
+vision-core = { package = "moenarch-vision-core", version = "=0.1.0", path = "crates/vision/vision-core" }

@@ -1,0 +1,33 @@
+[package]
+name = "moenarch-image-analysis-processing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "CPU image processing primitives for video-analysis."
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "image_analysis_processing"
+
+[dependencies]
+runtime-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+image-analysis-core.workspace = true
+image.workspace = true
+math-geometry-2d.workspace = true
+math-linear.workspace = true
+video-analysis-core.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "processing"
+harness = false

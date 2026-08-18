@@ -1,0 +1,40 @@
+[package]
+name = "moenarch-image-analysis-embeddings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Concrete image and face embedding contracts, presets, and backend traits."
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "image_analysis_embeddings"
+
+[dependencies]
+runtime-core.workspace = true
+image-analysis-core.workspace = true
+image-analysis-detection.workspace = true
+image-analysis-processing.workspace = true
+image-analysis-ocr.workspace = true
+image-analysis-segmentation.workspace = true
+image-analysis-synthesis.workspace = true
+math-geometry-2d.workspace = true
+model-runtime.workspace = true
+runtime-onnx.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+video-analysis-core.workspace = true
+vision-core.workspace = true
+
+[features]
+default = []
+onnx = ["runtime-onnx/onnxruntime"]
+external-tests = ["onnx"]
+
+[dev-dependencies]
+tempfile.workspace = true
