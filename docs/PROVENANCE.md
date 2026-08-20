@@ -28,3 +28,12 @@ manifests, scene adapter boundaries, and app references to the focused UI.
   `@moritzbrantner/visual-app-ui` workspace adapter.
 
 No behavioral equivalence is asserted by this structural bootstrap.
+
+## Registry-resolution handoff
+
+The committed `Cargo.lock` records registry sources and checksums for every
+cross-repository Rust dependency declared by this workspace. In particular,
+the two prerequisites that blocked the initial bootstrap are resolved as
+`moenarch-audio-contracts =0.1.0` and `scenedetect-core =0.1.0`. This is an
+additive migration record, not publication, source-removal, or behavioral
+verification evidence.
