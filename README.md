@@ -15,13 +15,11 @@ claimed. See [docs/PROVENANCE.md](docs/PROVENANCE.md) and
 
 ## Migration status
 
-The workspace intentionally uses exact registry coordinates and does not fall
-back to sibling paths or Git dependencies. The checked-in lockfile records
-registry sources and checksums for the former bootstrap prerequisites
+The workspace keeps exact registry coordinates in committed package manifests. Normal feature work may activate the exact foundation, NLP, and scene-detection source revisions declared in `.coding-tooling.source-deps.json`; the generated Cargo configuration remains ignored and uncommitted. The checked-in lockfile records registry sources and checksums for the former bootstrap prerequisites
 `moenarch-audio-contracts =0.1.0` and `scenedetect-core =0.1.0`, alongside the
 released foundation and narrow NLP contracts declared in the workspace
 manifest.
 
-This records dependency-resolution provenance only; it does not replace the
-separate behavioral verification required for a release. No publication or
-source removal is authorized by this bootstrap.
+This records the distribution baseline only; it does not make registry publication a prerequisite for source-mode implementation work and does not replace the separate behavioral verification required for a release. Run `bash scripts/source-deps activate` for the exact source graph and `bash scripts/source-deps deactivate` before registry-only release verification. See [docs/SOURCE_DEVELOPMENT.md](docs/SOURCE_DEVELOPMENT.md).
+
+No publication or source removal is authorized by this bootstrap.

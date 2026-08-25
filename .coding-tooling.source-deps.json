@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "cargo": {
+    "patches": [
+      {
+        "package": "moenarch-audio-contracts",
+        "git": "https://github.com/moritzbrantner/moenarch-foundation",
+        "rev": "648e3ef18dc5d32d5fcbb211ed7a118b2731a387",
+        "localPath": "../moenarch-foundation/crates/audio/audio-contracts"
+      },
+      {
+        "package": "moenarch-data-inversion-core",
+        "git": "https://github.com/moritzbrantner/moenarch-foundation",
+        "rev": "648e3ef18dc5d32d5fcbb211ed7a118b2731a387",
+        "localPath": "../moenarch-foundation/crates/data/data-inversion-core"
+      },
+      {
+        "package": "moenarch-math-geometry-2d",
+        "git": "https://github.com/moritzbrantner/moenarch-foundation",
+        "rev": "648e3ef18dc5d32d5fcbb211ed7a118b2731a387",
+        "localPath": "../moenarch-foundation/crates/math/math-geometry-2d"
+      },
+      {
+        "package": "moenarch-math-linear",
+        "git": "https://github.com/moritzbrantner/moenarch-foundation",
+        "rev": "648e3ef18dc5d32d5fcbb211ed7a118b2731a387",
+        "localPath": "../moenarch-foundation/crates/math/math-linear"
+      },
+      {
+        "package": "moenarch-media-core",
+        "git": "https://github.com/moritzbrantner/moenarch-foundation",
+        "rev": "648e3ef18dc5d32d5fcbb211ed7a118b2731a387",
+        "localPath": "../moenarch-foundation/crates/media/media-core"
+      },
+      {
+        "package": "moenarch-model-runtime",
+        "git": "https://github.com/moritzbrantner/moenarch-foundation",
+        "rev": "648e3ef18dc5d32d5fcbb211ed7a118b2731a387",
+        "localPath": "../moenarch-foundation/crates/runtime/model-runtime"
+      },
+      {
+        "package": "moenarch-numbers-core",
+        "git": "https://github.com/moritzbrantner/moenarch-foundation",
+        "rev": "648e3ef18dc5d32d5fcbb211ed7a118b2731a387",
+        "localPath": "../moenarch-foundation/crates/data/numbers-core"
+      },
+      {
+        "package": "moenarch-runtime-core",
+        "git": "https://github.com/moritzbrantner/moenarch-foundation",
+        "rev": "648e3ef18dc5d32d5fcbb211ed7a118b2731a387",
+        "localPath": "../moenarch-foundation/crates/runtime/runtime-core"
+      },
+      {
+        "package": "moenarch-runtime-onnx",
+        "git": "https://github.com/moritzbrantner/moenarch-foundation",
+        "rev": "648e3ef18dc5d32d5fcbb211ed7a118b2731a387",
+        "localPath": "../moenarch-foundation/crates/runtime/runtime-onnx"
+      },
+      {
+        "package": "moenarch-tensor-data",
+        "git": "https://github.com/moritzbrantner/moenarch-foundation",
+        "rev": "648e3ef18dc5d32d5fcbb211ed7a118b2731a387",
+        "localPath": "../moenarch-foundation/crates/data/tensor-data"
+      },
+      {
+        "package": "moenarch-text-core",
+        "git": "https://github.com/moritzbrantner/nlp-stack",
+        "rev": "7bd8c1ec4f2cbe2cf18538c5046830356a087b46",
+        "localPath": "../nlp-stack/crates/text/text-core"
+      },
+      {
+        "package": "scenedetect-core",
+        "git": "https://github.com/moritzbrantner/scenedetect-rs",
+        "rev": "d01371e8e9b7716c2dd778e85e0ce19cb2349c86",
+        "localPath": "../scenedetect-rs/crates/scenedetect-core"
+      }
+    ]
+  }
+}

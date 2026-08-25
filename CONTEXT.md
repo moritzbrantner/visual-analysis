@@ -2,7 +2,7 @@
 
 This repository is the visual capability layer of the Moenarch Rust ecosystem.
 It owns image analysis, shared visual contracts, and non-spatial video
-processing. It may depend on exact published foundation and NLP contracts.
+processing. It may depend on foundation and NLP contracts. During normal development, the committed source-dependency declaration may replace registry packages with exact reviewed source revisions; distributed builds remain registry-only.
 
 It must not own ComfyUI, posture, reconstruction, radiance-field, MVS, SfM, or
 other spatial packages. It must not depend on spatial-analysis or on the
