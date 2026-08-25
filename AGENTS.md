@@ -6,19 +6,20 @@ Run the installed `moenarch-verification-harness` skill's `audit` command before
 Early selection is advisory; `full` remains the handoff gate. See `.harness/README.md`.
 <!-- verification-harness:end -->
 
-Read `CONTEXT.md`, `docs/PROVENANCE.md`, `docs/OWNERSHIP.md`, and the checked
-inventories before changing package boundaries.
+Read `CONTEXT.md`, `docs/PROVENANCE.md`, `docs/OWNERSHIP.md`, `docs/SOURCE_DEVELOPMENT.md`, and the checked inventories before changing package boundaries or cross-repository dependencies.
 
 ## Boundaries
 
 - Keep exactly the 27 source families classified in the ownership inventory.
-- Do not add ComfyUI or spatial packages, spatial reverse dependencies, sibling
-  repository paths, moving Git dependencies, or rust-packages test support.
-- Use exact registry coordinates for cross-repository Rust dependencies.
+- Do not add ComfyUI or spatial packages, spatial reverse dependencies, sibling repository paths, moving Git dependencies, or rust-packages test support to committed package manifests.
+- Keep exact registry coordinates in package manifests. Normal development may temporarily replace them with the exact source revisions declared in `.coding-tooling.source-deps.json` through the managed, ignored Cargo configuration.
+- Ordinary feature work is source-first. Do not publish crates, bump package versions, create tags, or start a release train merely to unblock development.
+- Keep package versions stable during source work when compatibility permits; a dedicated release task owns version bumps, publication, and registry-only verification.
+- If a consumer task expands beyond the consumer plus two upstream repositories, treat that as an architecture boundary problem unless broader migration scope was explicitly assigned.
 - Treat `scenedetect-core` as the canonical owner of shared scene algorithms.
 - Keep `@moritzbrantner/visual-app-ui` private and destination-owned.
-- Never publish, tag, release, remove monolith source, or merge the bootstrap
-  without a separate exact authorization.
+- Never publish, tag, release, remove monolith source, or merge the bootstrap without a separate exact authorization.
+- Registry-only dependency verification is release evidence; it is not required before exact source-mode implementation evidence is useful.
 
 ## Bootstrap verification policy
 
@@ -28,8 +29,8 @@ package, or benchmark suites for this bootstrap. Run only:
 
 ```bash
 git diff --check c5d6b02a708837cf01ee6e033faa41b0a667b38b..HEAD
-python3 scripts/check_visual_extraction.py --check  # authoritative; registry prerequisites fail closed
-cargo metadata --format-version 1 --no-deps  # only when blockers resolve
+python3 scripts/check_visual_extraction.py --check  # authoritative structural and registry-coordinate audit
+cargo metadata --format-version 1 --no-deps  # registry by default; exact managed source graph when activated
 ```
 
 For focused extraction iteration, `bun run structural:prepare` checks the

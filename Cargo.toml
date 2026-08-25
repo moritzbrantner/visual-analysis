@@ -31,8 +31,10 @@ tempfile = "3.23.0"
 thiserror = "2.0.17"
 tokenizers = { version = "0.22.2", default-features = false, features = ["unstable_wasm"] }
 
-# Exact registry-only dependencies owned by earlier extraction waves. Missing
-# packages remain explicit blockers; sibling paths and Git fallbacks are forbidden.
+# Registry coordinates remain the distribution contract for dependencies owned by
+# earlier extraction waves. Normal development may activate the exact source
+# revisions declared in .coding-tooling.source-deps.json; package manifests do
+# not gain sibling paths or moving Git dependencies.
 audio-contracts = { package = "moenarch-audio-contracts", version = "=0.1.0" }
 data-inversion-core = { package = "moenarch-data-inversion-core", version = "=0.1.1" }
 math-geometry-2d = { package = "moenarch-math-geometry-2d", version = "=0.1.1" }

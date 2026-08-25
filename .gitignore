@@ -1,5 +1,6 @@
 .cargo-target/
 target/
+/.cargo/config.toml
 .external-test-tools/
 prototypes/web/video-analysis-web/public/samples/video/test-video.mp4
 prototypes/web/video-analysis-web/public/samples/video/*LQWH8o6kwMI*.mp4
