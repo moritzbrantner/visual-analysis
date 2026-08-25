@@ -65,7 +65,7 @@
       {
         "package": "moenarch-text-core",
         "git": "https://github.com/moritzbrantner/nlp-stack",
-        "rev": "72fa90598d0bfb1797f69e1f6501cf89b7ef9870",
+        "rev": "7bd8c1ec4f2cbe2cf18538c5046830356a087b46",
         "localPath": "../nlp-stack/crates/text/text-core"
       },
       {
