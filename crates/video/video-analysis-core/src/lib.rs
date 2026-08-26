@@ -604,6 +604,7 @@ impl SceneDetector for ContentDetector {
                 }
             }
         }
+        let detector = self.name();
         Ok(detected
             .scene_list
             .scenes
@@ -612,7 +613,7 @@ impl SceneDetector for ContentDetector {
             .filter(|start| *start != 0 && self.emitted.insert(*start))
             .map(|frame_index| Cut {
                 position: position_like(frame.position, frame_index),
-                detector: self.name(),
+                detector,
                 score: None,
             })
             .collect())
