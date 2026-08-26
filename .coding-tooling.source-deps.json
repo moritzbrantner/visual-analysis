@@ -72,7 +72,7 @@
       {
         "package": "scenedetect-core",
         "git": "https://github.com/moritzbrantner/scenedetect-rs",
-        "rev": "d01371e8e9b7716c2dd778e85e0ce19cb2349c86",
+        "rev": "4b2fb53d9a0c82fdf30aea2710d38b5438d08128",
         "localPath": "../scenedetect-rs/crates/scenedetect-core"
       }
     ]
