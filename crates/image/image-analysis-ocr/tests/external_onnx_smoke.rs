@@ -2,28 +2,14 @@
 
 use std::path::{Path, PathBuf};
 
-use image_analysis_core::OwnedImage;
-use image_analysis_ocr::{OcrBackend, OcrRequest, OnnxTrOcrBackend};
-use model_runtime::ModelBundle;
+use runtime_core::{OperationId, SurfaceRequest};
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
-        .find(|root| root.join("tests/fixtures").is_dir())
-        .expect("workspace root with tests/fixtures")
+        .find(|root| root.join("tests/fixtures/ocr").is_dir())
+        .expect("workspace root with OCR fixtures")
         .to_path_buf()
-}
-
-fn model_runtime_roots() -> Vec<PathBuf> {
-    vec![
-        PathBuf::from(".model-runtime"),
-        workspace_root().join(".model-runtime"),
-    ]
-}
-
-fn fixture_image() -> OwnedImage {
-    image_analysis_io::read_image(workspace_root().join("tests/fixtures/ocr/trocr-hello.png"))
-        .expect("load OCR fixture")
 }
 
 fn normalize_ocr_text(text: &str) -> String {
@@ -33,51 +19,31 @@ fn normalize_ocr_text(text: &str) -> String {
         .collect()
 }
 
-fn bundle(names: &[&str]) -> Option<ModelBundle> {
-    let mut roots = Vec::new();
-    for bundle_root in model_runtime_roots() {
-        for name in names {
-            let root = bundle_root.join(name).join("main");
-            if root.join("manifest.json").is_file() {
-                return Some(ModelBundle::load(&root).expect("load model bundle"));
-            }
-            roots.push(root);
-        }
-    }
-    eprintln!(
-        "skipping external ONNX smoke test; missing any manifest at {}",
-        roots
-            .iter()
-            .map(|root| root.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    None
-}
-
 #[test]
-#[ignore = "requires local TrOCR ONNX bundle in .model-runtime"]
-fn trocr_onnx_returns_non_empty_ocr_document() {
-    let Some(bundle) = bundle(&["trocr-base-printed-onnx", "trocr-base-printed"]) else {
-        return;
-    };
-    let image = fixture_image();
-    let mut backend = OnnxTrOcrBackend::from_bundle(bundle).unwrap();
-    let document = backend
-        .recognize_image(
-            &image.as_view(),
-            &OcrRequest::new().languages(["en"]).include_tokens(false),
-        )
-        .unwrap();
+#[ignore = "downloads/uses local TrOCR ONNX bundle and requires ONNX Runtime"]
+fn standard_ocr_surface_recognizes_hello_fixture() {
+    let root = workspace_root();
+    let response = image_analysis_ocr::surface::run_surface_operation(SurfaceRequest {
+        operation: OperationId::new("image.ocr.recognize"),
+        input: serde_json::json!({
+            "imagePath": root.join("tests/fixtures/ocr/trocr-hello.png"),
+            "modelRoot": root.join(".model-runtime"),
+            "model": "trocr-base-printed-onnx",
+            "autoDownload": true,
+            "languages": ["en"],
+            "maxNewTokens": 64
+        }),
+    })
+    .expect("run OCR surface");
 
-    let normalized = normalize_ocr_text(&document.text);
+    assert_eq!(response.value["executed"], true);
+    let text = response.value["document"]["text"]
+        .as_str()
+        .expect("OCR document text");
     assert!(
-        normalized.contains("HELLO"),
-        "expected OCR text to contain HELLO, got {:?}",
-        document.text
+        normalize_ocr_text(text).contains("HELLO"),
+        "expected OCR text to contain HELLO, got {text:?}"
     );
-    assert_eq!(
-        (document.width, document.height),
-        (image.width, image.height)
-    );
+    assert_eq!(response.value["document"]["width"], 240);
+    assert_eq!(response.value["document"]["height"], 80);
 }
