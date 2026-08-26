@@ -110,6 +110,27 @@ def registry_errors() -> list[str]:
     return errors
 
 
+def post_extraction_adaptations(errors: list[str]) -> set[str]:
+    path = ROOT / "docs/repository-split/post-extraction-adaptations.json"
+    if not path.is_file():
+        return set()
+
+    document = load_json(path)
+    if document.get("schema_version") != 1:
+        errors.append("post-extraction adaptations must use schema version 1")
+    if document.get("base_extraction_sha") != SOURCE_SHA:
+        errors.append("post-extraction adaptations use the wrong extraction SHA")
+
+    raw_paths = document.get("paths")
+    if not isinstance(raw_paths, list) or not all(isinstance(item, str) for item in raw_paths):
+        errors.append("post-extraction adaptations paths must be a string list")
+        return set()
+    paths = set(raw_paths)
+    if len(paths) != len(raw_paths):
+        errors.append("post-extraction adaptations contain duplicate paths")
+    return paths
+
+
 def validate() -> list[str]:
     errors: list[str] = []
     cargo_manifests = sorted((ROOT / "crates").rglob("Cargo.toml"))
@@ -220,6 +241,24 @@ def validate() -> list[str]:
     identity = load_json(ROOT / "docs/repository-split/source-byte-identity.json")
     if identity.get("source_commit") != SOURCE_SHA:
         errors.append("byte-identity inventory uses the wrong source SHA")
+
+    post_adapted = post_extraction_adaptations(errors)
+    identity_records = {
+        record.get("path"): record
+        for record in identity.get("files", [])
+        if isinstance(record, dict) and isinstance(record.get("path"), str)
+    }
+    for path in sorted(post_adapted):
+        record = identity_records.get(path)
+        if record is None:
+            errors.append(f"post-extraction adaptation is not in source inventory: {path}")
+        elif record.get("status") != "byte-identical":
+            errors.append(
+                f"post-extraction adaptation must reference a byte-identical bootstrap file: {path}"
+            )
+        if not (ROOT / path).is_file():
+            errors.append(f"post-extraction adaptation is absent: {path}")
+
     identical = 0
     adapted = 0
     for record in identity.get("files", []):
@@ -229,9 +268,10 @@ def validate() -> list[str]:
             continue
         if record["status"] == "byte-identical":
             identical += 1
-            actual = hashlib.sha256(path.read_bytes()).hexdigest()
-            if actual != record["source_sha256"]:
-                errors.append(f"byte identity changed: {record['path']}")
+            if record["path"] not in post_adapted:
+                actual = hashlib.sha256(path.read_bytes()).hexdigest()
+                if actual != record["source_sha256"]:
+                    errors.append(f"byte identity changed: {record['path']}")
         elif record["status"] == "adapted":
             adapted += 1
         else:
