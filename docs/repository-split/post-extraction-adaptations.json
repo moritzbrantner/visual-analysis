@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "base_extraction_sha": "b8b29cf8db0b86ed1b133a18155adf24992f9483",
+  "reason": "Post-bootstrap feature work promoting the existing TrOCR and DETR implementations to executable standard surfaces with semantic acceptance coverage.",
+  "paths": [
+    "crates/image/image-analysis-detection-cli/Cargo.toml",
+    "crates/image/image-analysis-detection-server/Cargo.toml",
+    "crates/image/image-analysis-detection/Cargo.toml",
+    "crates/image/image-analysis-detection/README.md",
+    "crates/image/image-analysis-detection/src/surface.rs",
+    "crates/image/image-analysis-detection/tests/external_onnx_smoke.rs",
+    "crates/image/image-analysis-ocr-cli/Cargo.toml",
+    "crates/image/image-analysis-ocr-server/Cargo.toml",
+    "crates/image/image-analysis-ocr/README.md",
+    "crates/image/image-analysis-ocr/src/surface.rs",
+    "crates/image/image-analysis-ocr/tests/external_onnx_smoke.rs"
+  ]
+}
