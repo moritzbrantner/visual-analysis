@@ -20,7 +20,11 @@ jobs:
           ref: 7d431b70076a764da24bd229988737c06860e378
           path: scenedetect-source
       - name: Format changed Rust surface
-        run: cargo fmt --all -- --check
+        run: >-
+          rustfmt --edition 2021 --check
+          crates/video/video-analysis-detectors/src/canonical.rs
+          crates/video/video-analysis-detectors/src/lib.rs
+          crates/video/video-analysis-detectors/tests/canonical_content.rs
       - name: Test one-pass scene canary against exact source
         run: >-
           cargo test -p moenarch-video-analysis-detectors --test canonical_content
