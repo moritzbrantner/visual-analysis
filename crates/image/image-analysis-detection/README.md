@@ -1,52 +1,27 @@
 # image-analysis-detection
 
-Object detection built from image segmentation masks, color blob detection, and
-SAM defaults for `moritzbrantner-video-analysis`.
+Object detection built from native ONNX inference, image segmentation masks, and deterministic color-blob detection.
 
 ## Feature flags
 
-- No optional feature flags today.
+- `onnx`: enables native ONNX Runtime execution for learned detectors.
+- `external-tests`: enables ignored semantic acceptance tests and implies `onnx`.
 
 ## Runtime Surface
 
-- Workflow operations: `image.detection.colorBlob` runs deterministic in-memory
-  red blob detection.
-- Debug operations: `image.detection.models`, `image.detection.boxSummary`, and
-  `describe` inspect model metadata, imported boxes, and package metadata.
-- `image.detection.models` does not download or run detector models.
+- Primary workflow: `image.detection.detect` runs the `Xenova/detr-resnet-50` ONNX preset against an in-memory image payload or `imagePath`. `autoDownload` remains opt-in and model bundles default to `.model-runtime`.
+- Workflow operation `image.detection.colorBlob` keeps the deterministic in-memory red-blob detector as a lightweight fallback.
+- Debug operations: `image.detection.models`, `image.detection.boxSummary`, and `describe` inspect model metadata and imported boxes without running a detector.
+- CLI and server adapters enable `onnx`. WASM keeps deterministic/imported workflows but does not execute DETR.
+- YuNet face-detection primitives remain available at the library level but are not promoted to the standard runtime surface in this slice.
 
-## Example
-
-```rust
-# fn main() -> Result<(), Box<dyn std::error::Error>> {
-use image_analysis_detection::{ColorBlobDetector, ImageDetectionRequest, MaskProposalDetector};
-use image_analysis_segmentation::ImageSegmentationBackend;
-use image_analysis_core::ImageView;
-use video_analysis_core::Result;
-
-struct EmptyBackend;
-
-impl ImageSegmentationBackend for EmptyBackend {
-    fn segment_image(
-        &mut self,
-        _image: &ImageView<'_>,
-        _request: &image_analysis_segmentation::ImageSegmentationRequest,
-    ) -> Result<Vec<image_analysis_segmentation::ImageSegment>> {
-        Ok(Vec::new())
-    }
-}
-
-let mut detector = MaskProposalDetector::new(EmptyBackend)
-    .request(ImageDetectionRequest::automatic_mask_proposals());
-let image = image_analysis_core::OwnedImage::new_rgb(1, 1, vec![0, 0, 0])?;
-let _ = detector.detect_image(&image.as_view())?;
-let _ = ColorBlobDetector::red_car().detect_image(&image.as_view())?;
-# Ok(())
-# }
-```
+The semantic external test runs the standard `image.detection.detect` surface against a pinned Hugging Face COCO fixture and requires high-confidence cat detections on both sides of the image.
 
 ## Related crates
 
 - `image-analysis-core`
+- `image-analysis-io`
+- `image-analysis-processing`
 - `image-analysis-segmentation`
-- `image-analysis-classification, image-analysis-embeddings, image-analysis-captioning, image-analysis-ocr, image-analysis-segmentation, or image-analysis-detection`
+- `model-runtime`
+- `runtime-onnx`

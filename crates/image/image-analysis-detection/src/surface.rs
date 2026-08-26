@@ -1,16 +1,24 @@
 //! Library-owned runtime surface for `image-analysis-detection`.
 
+use std::path::PathBuf;
+
 use image_analysis_core::contracts::{sample_image_json, ImagePayload};
+use model_runtime::{ModelBundleResolveOptions, ModelPreset};
 use runtime_core::{
     describe_surface_response, structured_operation_response, OperationId, PackageSurface,
-    RuntimeCapabilities, SurfaceOperation, SurfaceRequest, SurfaceResponse,
+    RuntimeCapabilities, RuntimeRequirement, SurfaceExecutionMode, SurfaceExecutionPlan,
+    SurfaceOperation, SurfaceRequest, SurfaceResponse, SurfaceSideEffect,
 };
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-
 use video_analysis_core::BoundingBox;
 
-use crate::{ColorBlobDetectionOptions, ColorBlobDetector, FaceDetectionPreset, TargetColor};
+use crate::{
+    ColorBlobDetectionOptions, ColorBlobDetector, FaceDetectionPreset, ImageDetection,
+    OnnxObjectDetector, TargetColor,
+};
+
+const DEFAULT_DETECTION_MODEL: &str = "xenova-detr-resnet-50-onnx";
 
 /// Returns the package surface exposed by every transport wrapper.
 pub fn package_surface() -> PackageSurface {
@@ -22,8 +30,14 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "describe",
                 "Describe package",
-                "Canonical image detection types and mask-proposal adapters for video-analysis.",
+                "Canonical image detection types, native DETR execution, and mask-proposal adapters for video-analysis.",
                 serde_json::json!({"includeOperations": true}),
+            ),
+            operation(
+                "image.detection.detect",
+                "Detect objects",
+                "Runs local ONNX DETR object detection against an in-memory image payload or local image path. Model downloads remain opt-in through autoDownload.",
+                serde_json::json!({"image": sample_image_json(), "model": DEFAULT_DETECTION_MODEL, "autoDownload": false, "minScore": 0.5, "limit": 20}),
             ),
             operation(
                 "image.detection.colorBlob",
@@ -34,7 +48,7 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "image.detection.models",
                 "Detection models",
-                "Returns deterministic detection model catalog and default specs without running detectors.",
+                "Returns detection model catalog and deterministic fallbacks without running detectors.",
                 serde_json::json!({}),
             ),
             operation(
@@ -64,35 +78,80 @@ fn operation(
         wasm_supported: true,
         server_supported: true,
     };
+    if id == "image.detection.detect" {
+        let plan = model_execution_plan(id);
+        operation.input_schema["xExecutionPlan"] =
+            runtime_core::surface_execution_plan_value(&plan);
+        operation.output_schema["xExecutionPlan"] =
+            runtime_core::surface_execution_plan_value(&plan);
+        operation.wasm_supported = false;
+    }
     if let Some(contract) = landscape_contract(id) {
         runtime_core::attach_landscape_contract(&mut operation, contract);
     }
     operation
 }
 
+fn model_execution_plan(operation: &str) -> SurfaceExecutionPlan {
+    SurfaceExecutionPlan {
+        operation: OperationId::new(operation),
+        mode: SurfaceExecutionMode::InMemory,
+        side_effects: vec![
+            SurfaceSideEffect::ReadsFiles,
+            SurfaceSideEffect::WritesFiles,
+            SurfaceSideEffect::Network,
+        ],
+        cancellable: false,
+        progress_unit: Some("objects".to_string()),
+        expected_artifacts: Vec::new(),
+        requirements: vec![
+            RuntimeRequirement {
+                name: "onnxruntime".to_string(),
+                description: Some("ONNX Runtime CPU execution via runtime-onnx".to_string()),
+                required: true,
+            },
+            RuntimeRequirement {
+                name: "local-filesystem".to_string(),
+                description: Some("Readable and writable .model-runtime bundle root".to_string()),
+                required: true,
+            },
+            RuntimeRequirement {
+                name: "hugging-face-access".to_string(),
+                description: Some(
+                    "Network access only when autoDownload is explicitly true".to_string(),
+                ),
+                required: false,
+            },
+        ],
+        max_recommended_input_bytes: Some(16_777_216),
+    }
+}
+
 fn landscape_contract(id: &str) -> Option<runtime_core::landscape::LandscapeOperationContract> {
     match id {
-        "image.detection.colorBlob" => {
+        "image.detection.detect" | "image.detection.colorBlob" => {
+            let function = if id == "image.detection.detect" {
+                "image.detection.detect"
+            } else {
+                "image.detection.detectColorBlob"
+            };
             Some(runtime_core::landscape::LandscapeOperationContract::new(
-                runtime_core::landscape::LandscapeFunction::new(
-                    "image.detection.detectColorBlob",
-                    env!("CARGO_PKG_NAME"),
-                )
-                .input(runtime_core::landscape::LandscapePort::new(
-                    "image",
-                    runtime_core::landscape::well_known::image_image(),
-                ))
-                .input(runtime_core::landscape::LandscapePort::new(
-                    "request",
-                    runtime_core::landscape::well_known::image_detection_request(),
-                ))
-                .output(
-                    runtime_core::landscape::LandscapePort::new(
-                        "detections",
-                        runtime_core::landscape::well_known::vision_detection(),
-                    )
-                    .many(),
-                ),
+                runtime_core::landscape::LandscapeFunction::new(function, env!("CARGO_PKG_NAME"))
+                    .input(runtime_core::landscape::LandscapePort::new(
+                        "image",
+                        runtime_core::landscape::well_known::image_image(),
+                    ))
+                    .input(runtime_core::landscape::LandscapePort::new(
+                        "request",
+                        runtime_core::landscape::well_known::image_detection_request(),
+                    ))
+                    .output(
+                        runtime_core::landscape::LandscapePort::new(
+                            "detections",
+                            runtime_core::landscape::well_known::vision_detection(),
+                        )
+                        .many(),
+                    ),
             ))
         }
         _ => None,
@@ -105,6 +164,7 @@ pub fn run_surface_operation(request: SurfaceRequest) -> Result<SurfaceResponse,
     let operation = request.operation.clone();
     let value = match request.operation.as_str() {
         "describe" => return Ok(describe_surface_response(&surface, request)),
+        "image.detection.detect" => detect_value(parse_input(request.input)?)?,
         "image.detection.colorBlob" => color_blob_value(parse_input(request.input)?)?,
         "image.detection.models" => models_value(),
         "image.detection.boxSummary" => box_summary_value(parse_input(request.input)?)?,
@@ -120,6 +180,25 @@ pub fn run_surface_operation(request: SurfaceRequest) -> Result<SurfaceResponse,
 
 fn parse_input<T: DeserializeOwned>(input: serde_json::Value) -> Result<T, String> {
     serde_json::from_value(input).map_err(|error| format!("invalid request: {error}"))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DetectRequest {
+    #[serde(default)]
+    image: Option<ImagePayload>,
+    #[serde(default)]
+    image_path: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    auto_download: Option<bool>,
+    #[serde(default)]
+    model_root: Option<String>,
+    #[serde(default)]
+    min_score: Option<f32>,
+    #[serde(default)]
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -158,6 +237,100 @@ struct BoxPayload {
     height: u32,
 }
 
+fn detect_value(request: DetectRequest) -> Result<serde_json::Value, String> {
+    if request.image.is_some() && request.image_path.is_some() {
+        return Err("image.detection.detect accepts either image or imagePath, not both".to_string());
+    }
+    if request.image.is_none() && request.image_path.is_none() {
+        return Err("image.detection.detect requires image or imagePath".to_string());
+    }
+
+    let model = request
+        .model
+        .unwrap_or_else(|| DEFAULT_DETECTION_MODEL.to_string());
+    if model != DEFAULT_DETECTION_MODEL {
+        return Err(format!(
+            "unsupported object detection model `{model}`; expected `{DEFAULT_DETECTION_MODEL}`"
+        ));
+    }
+
+    let min_score = request.min_score.unwrap_or(0.5);
+    if !min_score.is_finite() || !(0.0..=1.0).contains(&min_score) {
+        return Err("detection minScore must be finite and between 0 and 1".to_string());
+    }
+    let limit = request.limit.unwrap_or(100);
+    if limit == 0 {
+        return Err("detection limit must be greater than zero".to_string());
+    }
+
+    let auto_download = request.auto_download.unwrap_or(false);
+    let spec = ModelPreset::XenovaDetrResnet50Onnx.spec();
+    let mut bundle_options = ModelBundleResolveOptions {
+        auto_download,
+        download_progress: auto_download,
+        ..ModelBundleResolveOptions::default()
+    };
+    if let Some(model_root) = request.model_root.as_deref() {
+        bundle_options.bundle_root = PathBuf::from(model_root);
+    }
+    let bundle_path = bundle_options.bundle_root.display().to_string();
+    let bundle = model_runtime::resolve_or_download_bundle(&spec, &bundle_options)
+        .map_err(|error| error.to_string())?;
+    let mut detector = OnnxObjectDetector::from_bundle(bundle).map_err(|error| error.to_string())?;
+    detector.score_threshold = min_score;
+
+    let mut detections = if let Some(image) = request.image {
+        let view = image.view().map_err(|error| error.to_string())?;
+        detector
+            .detect_image(&view)
+            .map_err(|error| error.to_string())?
+    } else {
+        let image_path = request.image_path.expect("validated imagePath");
+        let image = image_analysis_io::read_image(&image_path)
+            .map_err(|error| format!("failed to read detection image `{image_path}`: {error}"))?;
+        detector
+            .detect_image(&image.as_view())
+            .map_err(|error| error.to_string())?
+    };
+    detections.sort_by(|left, right| {
+        right
+            .score
+            .unwrap_or(f32::NEG_INFINITY)
+            .total_cmp(&left.score.unwrap_or(f32::NEG_INFINITY))
+    });
+    detections.truncate(limit);
+
+    Ok(serde_json::json!({
+        "executed": true,
+        "nativeOnly": true,
+        "cliSupported": true,
+        "wasmSupported": false,
+        "serverSupported": true,
+        "count": detections.len(),
+        "detections": detections.iter().map(detection_json).collect::<Vec<_>>(),
+        "modelId": DEFAULT_DETECTION_MODEL,
+        "bundlePath": bundle_path,
+        "runtime": "onnx",
+        "autoDownload": auto_download,
+        "minScore": min_score,
+        "limit": limit
+    }))
+}
+
+fn detection_json(detection: &ImageDetection) -> serde_json::Value {
+    serde_json::json!({
+        "label": &detection.label,
+        "score": detection.score,
+        "region": {
+            "x": detection.region.x,
+            "y": detection.region.y,
+            "width": detection.region.width,
+            "height": detection.region.height
+        },
+        "attributes": &detection.attributes
+    })
+}
+
 fn color_blob_value(request: ColorBlobRequest) -> Result<serde_json::Value, String> {
     let target = match request.target_color.as_str() {
         "red" => TargetColor::Red,
@@ -174,36 +347,36 @@ fn color_blob_value(request: ColorBlobRequest) -> Result<serde_json::Value, Stri
         .map_err(|error| error.to_string())?;
     Ok(serde_json::json!({
         "count": detections.len(),
-        "detections": detections
-            .into_iter()
-            .map(|detection| serde_json::json!({
-                "label": detection.label,
-                "score": detection.score,
-                "region": {
-                    "x": detection.region.x,
-                    "y": detection.region.y,
-                    "width": detection.region.width,
-                    "height": detection.region.height
-                },
-                "attributes": detection.attributes
-            }))
-            .collect::<Vec<_>>()
+        "detections": detections.iter().map(detection_json).collect::<Vec<_>>()
     }))
 }
 
 fn models_value() -> serde_json::Value {
+    let detr_spec = ModelPreset::XenovaDetrResnet50Onnx.spec();
     let face_spec = FaceDetectionPreset::OpenCvYuNet.model_spec();
     serde_json::json!({
-        "models": [{
-            "id": "opencv-yunet-onnx",
-            "task": face_spec.task.as_protocol_str(),
-            "repoId": face_spec.repo_id_value(),
-            "revision": face_spec.revision_value(),
-            "name": face_spec.name,
-            "files": face_spec.files,
-            "supported": false,
-            "fallback": "image.detection.colorBlob"
-        }],
+        "models": [
+            {
+                "id": DEFAULT_DETECTION_MODEL,
+                "task": detr_spec.task.as_protocol_str(),
+                "repoId": detr_spec.repo_id_value(),
+                "revision": detr_spec.revision_value(),
+                "name": detr_spec.name,
+                "files": detr_spec.files,
+                "supported": cfg!(feature = "onnx"),
+                "operation": "image.detection.detect"
+            },
+            {
+                "id": "opencv-yunet-onnx",
+                "task": face_spec.task.as_protocol_str(),
+                "repoId": face_spec.repo_id_value(),
+                "revision": face_spec.revision_value(),
+                "name": face_spec.name,
+                "files": face_spec.files,
+                "supported": false,
+                "fallback": "image.detection.colorBlob"
+            }
+        ],
         "deterministicFallbacks": [{
             "id": "color-blob-red",
             "operation": "image.detection.colorBlob",
@@ -283,6 +456,56 @@ mod tests {
     use super::*;
 
     #[test]
+    fn package_surface_lists_detection_operations() {
+        let ids = package_surface()
+            .operations
+            .into_iter()
+            .map(|operation| operation.id.0)
+            .collect::<Vec<_>>();
+        assert!(ids.contains(&"image.detection.detect".to_string()));
+        assert!(ids.contains(&"image.detection.colorBlob".to_string()));
+        assert!(ids.contains(&"image.detection.models".to_string()));
+    }
+
+    #[test]
+    fn detect_requires_exactly_one_image_source() {
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("image.detection.detect"),
+            input: serde_json::json!({"model": DEFAULT_DETECTION_MODEL}),
+        })
+        .expect_err("missing image");
+        assert!(error.contains("requires image or imagePath"));
+    }
+
+    #[test]
+    fn detect_rejects_unsupported_model_before_bundle_resolution() {
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("image.detection.detect"),
+            input: serde_json::json!({
+                "image": sample_image_json(),
+                "model": "yolos-tiny",
+                "autoDownload": false
+            }),
+        })
+        .expect_err("unsupported model");
+        assert!(error.contains("unsupported object detection model"));
+    }
+
+    #[test]
+    fn detect_rejects_invalid_threshold_before_bundle_resolution() {
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("image.detection.detect"),
+            input: serde_json::json!({
+                "image": sample_image_json(),
+                "minScore": 1.5,
+                "autoDownload": false
+            }),
+        })
+        .expect_err("invalid threshold");
+        assert!(error.contains("between 0 and 1"));
+    }
+
+    #[test]
     fn detects_red_block() {
         let response = run_surface_operation(SurfaceRequest {
             operation: OperationId::new("image.detection.colorBlob"),
@@ -321,7 +544,7 @@ mod tests {
             input: serde_json::json!({}),
         })
         .expect("models");
-        assert_eq!(response.value["models"][0]["id"], "opencv-yunet-onnx");
+        assert_eq!(response.value["models"][0]["id"], DEFAULT_DETECTION_MODEL);
     }
 
     #[test]

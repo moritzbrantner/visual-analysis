@@ -20,6 +20,7 @@ runtime-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 image-analysis-core.workspace = true
+image-analysis-io.workspace = true
 image-analysis-processing.workspace = true
 image-analysis-segmentation.workspace = true
 model-runtime.workspace = true
