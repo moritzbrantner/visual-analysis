@@ -1,0 +1,96 @@
+name: Native ONNX acceptance
+
+on:
+  pull_request:
+    paths:
+      - "crates/image/image-analysis-ocr/**"
+      - "crates/image/image-analysis-ocr-cli/**"
+      - "crates/image/image-analysis-ocr-server/**"
+      - "crates/image/image-analysis-detection/**"
+      - "crates/image/image-analysis-detection-cli/**"
+      - "crates/image/image-analysis-detection-server/**"
+      - "tests/fixtures/ocr/**"
+      - "scripts/setup_visual_acceptance_fixtures.sh"
+      - ".github/workflows/native-onnx.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  push:
+    branches: [main]
+    paths:
+      - "crates/image/image-analysis-ocr/**"
+      - "crates/image/image-analysis-ocr-cli/**"
+      - "crates/image/image-analysis-ocr-server/**"
+      - "crates/image/image-analysis-detection/**"
+      - "crates/image/image-analysis-detection-cli/**"
+      - "crates/image/image-analysis-detection-server/**"
+      - "tests/fixtures/ocr/**"
+      - "scripts/setup_visual_acceptance_fixtures.sh"
+      - ".github/workflows/native-onnx.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+
+permissions:
+  contents: read
+
+jobs:
+  native-onnx:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.95.0"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-visual-native-onnx-cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-visual-native-onnx-cargo-
+
+      - uses: actions/cache@v4
+        with:
+          path: .model-runtime
+          key: ${{ runner.os }}-visual-native-onnx-models-v1
+
+      - name: Install ONNX Runtime
+        run: |
+          python -m pip install --disable-pip-version-check "onnxruntime==1.26.0"
+          python - <<'PY' >> "$GITHUB_ENV"
+          import onnxruntime
+          from pathlib import Path
+
+          capi = Path(onnxruntime.__file__).resolve().parent / "capi"
+          candidates = sorted(capi.glob("libonnxruntime.so*"))
+          if not candidates:
+              raise SystemExit(f"ONNX Runtime shared library not found under {capi}")
+          print(f"ORT_DYLIB_PATH={candidates[0]}")
+          PY
+
+      - name: Prepare semantic image fixtures
+        run: bash scripts/setup_visual_acceptance_fixtures.sh
+
+      - name: Verify OCR through standard surface
+        run: >-
+          cargo test -p moenarch-image-analysis-ocr
+          --features external-tests
+          --test external_onnx_smoke
+          -- --ignored --nocapture
+
+      - name: Verify object detection through standard surface
+        run: >-
+          cargo test -p moenarch-image-analysis-detection
+          --features external-tests
+          --test external_onnx_smoke
+          -- --ignored --nocapture
