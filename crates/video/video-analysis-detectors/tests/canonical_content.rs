@@ -6,9 +6,7 @@ use scenedetect_core::{
     BoundaryCandidateStatus, BoundaryReviewOptions, ContentDetectorConfig, DetectionOptions,
     DetectionStatsDecision, FrameIndex, MinSceneLenPolicy, SceneSpan,
 };
-use video_analysis_core::{
-    FramePosition, OwnedVideoFrame, PixelFormat, Result, VideoSource,
-};
+use video_analysis_core::{FramePosition, OwnedVideoFrame, PixelFormat, Result, VideoSource};
 use video_analysis_detectors::analyze_content_source;
 
 struct CountingVideoSource {
