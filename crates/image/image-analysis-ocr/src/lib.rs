@@ -81,16 +81,15 @@ impl OcrPreset {
         )
         .name(self.as_str())
         .file("config.json")
-        .file("preprocessor_config.json")
-        .first_available_file(["model.safetensors", "pytorch_model.bin"]);
+        .file("preprocessor_config.json");
 
         match self {
             Self::TrOcrBasePrinted | Self::TrOcrBaseHandwritten => base
+                .first_available_file(["model.safetensors", "pytorch_model.bin"])
                 .file("tokenizer.json")
                 .file("vocab.json")
                 .file("merges.txt"),
             Self::TrOcrBasePrintedOnnx | Self::TrOcrBaseHandwrittenOnnx => base
-                .file("preprocessor_config.json")
                 .file("tokenizer.json")
                 .optional_file("generation_config.json")
                 .optional_file("tokenizer_config.json")
@@ -107,9 +106,11 @@ impl OcrPreset {
                     "onnx/decoder_model_fp16.onnx",
                 ]),
             Self::DonutBaseCordV2 => base
+                .first_available_file(["model.safetensors", "pytorch_model.bin"])
                 .file("tokenizer.json")
                 .optional_file("sentencepiece.bpe.model"),
             Self::NougatBase => base
+                .first_available_file(["model.safetensors", "pytorch_model.bin"])
                 .file("tokenizer.json")
                 .optional_file("tokenizer_config.json")
                 .optional_file("special_tokens_map.json"),
