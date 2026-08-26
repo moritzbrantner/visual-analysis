@@ -619,6 +619,15 @@ impl SceneDetector for ContentDetector {
     }
 }
 
+
+fn position_like(current: FramePosition, frame_index: u64) -> FramePosition {
+    let delta = frame_index as i64 - current.frame_index as i64;
+    FramePosition {
+        frame_index,
+        timestamp: Timestamp::new(current.timestamp.pts + delta, current.timestamp.timebase),
+    }
+}
+
 /// Trait for video source implementations.
 pub trait VideoSource {
     /// Returns next frame.
