@@ -19,6 +19,8 @@ jobs:
           repository: moritzbrantner/scenedetect-rs
           ref: 7d431b70076a764da24bd229988737c06860e378
           path: scenedetect-source
+      - name: Move exact source outside the consumer workspace
+        run: mv scenedetect-source "$RUNNER_TEMP/scenedetect-source"
       - name: Format canary implementation and test
         run: >-
           rustfmt --edition 2021 --check
@@ -27,4 +29,4 @@ jobs:
       - name: Test one-pass scene canary against exact source
         run: >-
           cargo test -p moenarch-video-analysis-detectors --test canonical_content
-          --config 'patch.crates-io.scenedetect-core.path="scenedetect-source/crates/scenedetect-core"'
+          --config "patch.crates-io.scenedetect-core.path=\"$RUNNER_TEMP/scenedetect-source/crates/scenedetect-core\""
