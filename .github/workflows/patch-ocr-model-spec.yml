@@ -1,0 +1,62 @@
+name: Temporary OCR model spec repair
+
+on:
+  push:
+    branches: [codex/usable-vision-stack]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/usable-vision-stack
+
+      - name: Remove PyTorch weights from ONNX TrOCR bundle requirements
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/image/image-analysis-ocr/src/lib.rs")
+          text = path.read_text()
+          replacements = [
+              (
+                  '        .file("preprocessor_config.json")\n        .first_available_file(["model.safetensors", "pytorch_model.bin"]);',
+                  '        .file("preprocessor_config.json");',
+              ),
+              (
+                  '            Self::TrOcrBasePrinted | Self::TrOcrBaseHandwritten => base\n                .file("tokenizer.json")',
+                  '            Self::TrOcrBasePrinted | Self::TrOcrBaseHandwritten => base\n                .first_available_file(["model.safetensors", "pytorch_model.bin"])\n                .file("tokenizer.json")',
+              ),
+              (
+                  '            Self::TrOcrBasePrintedOnnx | Self::TrOcrBaseHandwrittenOnnx => base\n                .file("preprocessor_config.json")\n                .file("tokenizer.json")',
+                  '            Self::TrOcrBasePrintedOnnx | Self::TrOcrBaseHandwrittenOnnx => base\n                .file("tokenizer.json")',
+              ),
+              (
+                  '            Self::DonutBaseCordV2 => base\n                .file("tokenizer.json")',
+                  '            Self::DonutBaseCordV2 => base\n                .first_available_file(["model.safetensors", "pytorch_model.bin"])\n                .file("tokenizer.json")',
+              ),
+              (
+                  '            Self::NougatBase => base\n                .file("tokenizer.json")',
+                  '            Self::NougatBase => base\n                .first_available_file(["model.safetensors", "pytorch_model.bin"])\n                .file("tokenizer.json")',
+              ),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f"OCR model-spec patch target not found: {old!r}")
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          PY
+          git diff --check
+
+      - name: Commit repair and remove temporary workflow
+        run: |
+          git rm .github/workflows/patch-ocr-model-spec.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/image/image-analysis-ocr/src/lib.rs
+          git commit -m "Fix ONNX TrOCR bundle requirements"
+          git push origin HEAD:codex/usable-vision-stack
