@@ -22,38 +22,16 @@ jobs:
 
           path = Path("crates/video/video-analysis-core/src/lib.rs")
           text = path.read_text()
-          old = '''        Ok(detected
-            .scene_list
-            .scenes
-            .into_iter()
-            .map(|scene| scene.start.0)
-            .filter(|start| *start != 0 && self.emitted.insert(*start))
-            .map(|frame_index| Cut {
-                position: position_like(frame.position, frame_index),
-                detector: self.name(),
-                score: None,
-            })
-            .collect())
-'''
-          new = '''        let detector = self.name();
-        Ok(detected
-            .scene_list
-            .scenes
-            .into_iter()
-            .map(|scene| scene.start.0)
-            .filter(|start| *start != 0 && self.emitted.insert(*start))
-            .map(|frame_index| Cut {
-                position: position_like(frame.position, frame_index),
-                detector,
-                score: None,
-            })
-            .collect())
-'''
-          if new in text:
-              raise SystemExit(0)
-          if old not in text:
-              raise SystemExit("scene adapter borrow block not found")
-          path.write_text(text.replace(old, new, 1))
+          marker = "        Ok(detected\n            .scene_list"
+          replacement = "        let detector = self.name();\n        Ok(detected\n            .scene_list"
+          if replacement not in text:
+              if marker not in text:
+                  raise SystemExit("scene adapter result block not found")
+              text = text.replace(marker, replacement, 1)
+          old_name = "                detector: self.name(),"
+          if old_name in text:
+              text = text.replace(old_name, "                detector,", 1)
+          path.write_text(text)
           PY
           git diff --check
 
