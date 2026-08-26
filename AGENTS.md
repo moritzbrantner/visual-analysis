@@ -12,7 +12,8 @@ Read `CONTEXT.md`, `docs/PROVENANCE.md`, `docs/OWNERSHIP.md`, `docs/SOURCE_DEVEL
 
 - Keep exactly the 27 source families classified in the ownership inventory.
 - Do not add ComfyUI or spatial packages, spatial reverse dependencies, sibling repository paths, moving Git dependencies, or rust-packages test support to committed package manifests.
-- Keep exact registry coordinates in package manifests. Normal development may temporarily replace them with the exact source revisions declared in `.coding-tooling.source-deps.json` through the managed, ignored Cargo configuration.
+- Keep exact registry coordinates in package manifests. Normal development temporarily replaces them with the exact local source revisions declared in `.coding-tooling.source-deps.json` through the managed, ignored Cargo configuration.
+- The outer coding workspace owns the declared sibling repositories/worktrees. They must exist at their exact pinned revisions before source activation; do not add private-repository tokens or authenticated Git fallback to hosted CI.
 - Ordinary feature work is source-first. Do not publish crates, bump package versions, create tags, or start a release train merely to unblock development.
 - Keep package versions stable during source work when compatibility permits; a dedicated release task owns version bumps, publication, and registry-only verification.
 - If a consumer task expands beyond the consumer plus two upstream repositories, treat that as an architecture boundary problem unless broader migration scope was explicitly assigned.
