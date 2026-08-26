@@ -1,7 +1,9 @@
 #![doc = include_str!("../README.md")]
 
+pub mod canonical;
 pub mod surface;
 
+pub use canonical::{analyze_content_source, CanonicalContentAnalysis};
 pub use scenedetect_core::{
     AdaptiveDetectorConfig as AdaptiveDetector, DetectorConfig,
     HashDetectorConfig as HashDetector, HistogramDetectorConfig as HistogramDetector,
