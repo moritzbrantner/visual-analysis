@@ -10,8 +10,14 @@ pub fn package_surface() -> PackageSurface {
     let operations = [
         ("describe", "Describe package"),
         ("video.detectors.registry", "Summarize canonical detector registry"),
-        ("video.detectors.flashFilter", "Describe canonical minimum-length policy"),
-        ("video.detectors.compositePlan", "Describe the visual composition adapter"),
+        (
+            "video.detectors.flashFilter",
+            "Describe canonical minimum-length policy",
+        ),
+        (
+            "video.detectors.compositePlan",
+            "Describe the visual composition adapter",
+        ),
     ]
     .into_iter()
     .map(|(id, name)| SurfaceOperation {
@@ -41,7 +47,10 @@ pub fn run_surface_operation(request: SurfaceRequest) -> Result<SurfaceResponse,
         .iter()
         .any(|operation| operation.id == request.operation)
     {
-        return Err(format!("unsupported operation `{}`", request.operation));
+        return Err(format!(
+            "unsupported operation `{}`",
+            request.operation.as_str()
+        ));
     }
     Ok(SurfaceResponse {
         operation: request.operation,
