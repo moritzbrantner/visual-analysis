@@ -1,0 +1,27 @@
+name: Temporary scenedetect source canary
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scenedetect-source-canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: actions/checkout@v4
+        with:
+          repository: moritzbrantner/scenedetect-rs
+          ref: 7d431b70076a764da24bd229988737c06860e378
+          path: scenedetect-source
+      - name: Format changed Rust surface
+        run: cargo fmt --all -- --check
+      - name: Test one-pass scene canary against exact source
+        run: >-
+          cargo test -p moenarch-video-analysis-detectors --test canonical_content
+          --config 'patch.crates-io.scenedetect-core.path="scenedetect-source/crates/scenedetect-core"'
