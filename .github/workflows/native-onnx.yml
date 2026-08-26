@@ -41,10 +41,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.95.0"
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -63,6 +59,9 @@ jobs:
         with:
           path: .model-runtime
           key: ${{ runner.os }}-visual-native-onnx-models-v1
+
+      - name: Verify repository Rust toolchain
+        run: rustc --version && cargo --version
 
       - name: Install ONNX Runtime
         run: |
