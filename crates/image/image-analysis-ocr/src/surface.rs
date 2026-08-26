@@ -1,5 +1,8 @@
 //! Library-owned runtime surface for `image-analysis-ocr`.
 
+use std::path::PathBuf;
+
+use image_analysis_core::contracts::{sample_image_json, ImagePayload};
 use runtime_core::{
     describe_surface_response, structured_operation_response, OperationId, PackageSurface,
     RuntimeCapabilities, RuntimeRequirement, SurfaceExecutionMode, SurfaceExecutionPlan,
@@ -9,8 +12,9 @@ use serde::Deserialize;
 use video_analysis_core::BoundingBox;
 
 use crate::{
-    ocr_catalog, OcrBlockKind, OcrConfidence, OcrDocument, OcrPreset, OcrRequest, OcrTechnique,
-    OcrTextBlock, OcrTextContractOptions, OcrTextLine, OcrToken,
+    ocr_catalog, OcrBackend, OcrBlockKind, OcrConfidence, OcrDocument, OcrLocalModelOptions,
+    OcrPreset, OcrRequest, OcrTechnique, OcrTextBlock, OcrTextContractOptions, OcrTextLine,
+    OcrToken, OnnxTrOcrBackend,
 };
 
 /// Returns the package surface exposed by every transport wrapper.
@@ -23,13 +27,13 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "describe",
                 "Describe package",
-                "OCR model presets, request contracts, imported OCR summaries, and text document conversion.",
+                "OCR model presets, native TrOCR execution, imported OCR summaries, and text document conversion.",
                 serde_json::json!({"includeOperations": true}),
             ),
             operation(
                 "image.ocr.recognize",
                 "Recognize OCR text",
-                "Server-only local ONNX TrOCR OCR workflow. Default surface calls do not download models or run OCR; construct the native backend with local-onnx for execution.",
+                "Runs local ONNX TrOCR against an in-memory image payload or local image path. Model downloads remain opt-in through autoDownload.",
                 serde_json::json!({"image": sample_image_json(), "model": "trocr-base-printed-onnx", "autoDownload": false, "maxNewTokens": 64, "languages": ["en"]}),
             ),
             operation(
@@ -154,11 +158,16 @@ pub fn run_surface_operation(request: SurfaceRequest) -> Result<SurfaceResponse,
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RecognizeInput {
-    image: Option<serde_json::Value>,
+    #[serde(default)]
+    image: Option<ImagePayload>,
+    #[serde(default)]
+    image_path: Option<String>,
     #[serde(default)]
     model: Option<String>,
     #[serde(default)]
     auto_download: Option<bool>,
+    #[serde(default)]
+    model_root: Option<String>,
     #[serde(default)]
     max_new_tokens: Option<usize>,
     #[serde(default)]
@@ -281,26 +290,77 @@ fn models_value() -> serde_json::Value {
 }
 
 fn recognize_value(input: RecognizeInput) -> Result<serde_json::Value, String> {
-    if input.image.is_none() {
-        return Err("image.ocr.recognize requires an image payload".to_string());
+    if input.image.is_some() && input.image_path.is_some() {
+        return Err("image.ocr.recognize accepts either image or imagePath, not both".to_string());
     }
-    let max_new_tokens = input.max_new_tokens.unwrap_or(64);
-    if max_new_tokens == 0 {
+    if input.image.is_none() && input.image_path.is_none() {
+        return Err("image.ocr.recognize requires image or imagePath".to_string());
+    }
+
+    let model = input
+        .model
+        .unwrap_or_else(|| "trocr-base-printed-onnx".to_string());
+    let preset = model.parse::<OcrPreset>().map_err(|error| error.to_string())?;
+    if !matches!(
+        preset,
+        OcrPreset::TrOcrBasePrintedOnnx | OcrPreset::TrOcrBaseHandwrittenOnnx
+    ) {
+        return Err(format!(
+            "image.ocr.recognize requires an ONNX TrOCR preset, got `{model}`"
+        ));
+    }
+
+    if input.max_new_tokens.is_some_and(|value| value == 0) {
         return Err("OCR maxNewTokens must be greater than zero".to_string());
     }
+
+    let auto_download = input.auto_download.unwrap_or(false);
+    let mut local_options = OcrLocalModelOptions {
+        preset,
+        auto_download,
+        ..OcrLocalModelOptions::default()
+    };
+    if let Some(model_root) = input.model_root.as_deref() {
+        local_options.bundle_root = PathBuf::from(model_root);
+    }
+    let bundle_path = local_options.bundle_root.display().to_string();
+    let mut backend = OnnxTrOcrBackend::from_local_model(local_options)
+        .map_err(|error| error.to_string())?;
+    if let Some(max_new_tokens) = input.max_new_tokens {
+        backend.options.max_new_tokens = max_new_tokens;
+    }
+    let max_new_tokens = backend.options().max_new_tokens;
+    let request = OcrRequest::new()
+        .model_preset(preset)
+        .languages(input.languages.clone());
+
+    let document = if let Some(image) = input.image {
+        let view = image.view().map_err(|error| error.to_string())?;
+        backend
+            .recognize_image(&view, &request)
+            .map_err(|error| error.to_string())?
+    } else {
+        let image_path = input.image_path.expect("validated imagePath");
+        let image = image_analysis_io::read_image(&image_path)
+            .map_err(|error| format!("failed to read OCR image `{image_path}`: {error}"))?;
+        backend
+            .recognize_image(&image.as_view(), &request)
+            .map_err(|error| error.to_string())?
+    };
+
     Ok(serde_json::json!({
-        "executed": false,
-        "serverOnly": true,
+        "executed": true,
+        "nativeOnly": true,
+        "cliSupported": true,
         "wasmSupported": false,
         "serverSupported": true,
-        "document": null,
-        "modelId": input.model.unwrap_or_else(|| "trocr-base-printed-onnx".to_string()),
-        "bundlePath": ".model-runtime",
+        "document": document,
+        "modelId": preset.as_str(),
+        "bundlePath": bundle_path,
         "runtime": "onnx",
-        "autoDownload": input.auto_download.unwrap_or(false),
+        "autoDownload": auto_download,
         "maxNewTokens": max_new_tokens,
-        "languages": input.languages,
-        "diagnostics": ["ONNX TrOCR execution requires a native image-analysis-ocr build with the `local-onnx` feature; default surface calls never download models."]
+        "languages": input.languages
     }))
 }
 
@@ -398,16 +458,6 @@ fn build_document(input: DocumentInput) -> Result<OcrDocument, String> {
     Ok(document)
 }
 
-fn sample_image_json() -> serde_json::Value {
-    serde_json::json!({
-        "width": 2,
-        "height": 2,
-        "pixelFormat": "rgb24",
-        "stride": null,
-        "data": [255, 255, 255, 0, 0, 0, 255, 255, 255, 0, 0, 0]
-    })
-}
-
 fn build_block(input: BlockInput) -> Result<OcrTextBlock, String> {
     let mut block = OcrTextBlock::new(parse_block_kind(&input.kind), input.text)
         .map_err(|error| error.to_string())?;
@@ -496,19 +546,27 @@ mod tests {
     }
 
     #[test]
-    fn recognize_operation_is_side_effect_free_by_default() {
-        let response = run_surface_operation(SurfaceRequest {
+    fn recognize_requires_exactly_one_image_source() {
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("image.ocr.recognize"),
+            input: serde_json::json!({"model": "trocr-base-printed-onnx"}),
+        })
+        .expect_err("missing image");
+        assert!(error.contains("requires image or imagePath"));
+    }
+
+    #[test]
+    fn recognize_rejects_non_onnx_preset_before_model_resolution() {
+        let error = run_surface_operation(SurfaceRequest {
             operation: OperationId::new("image.ocr.recognize"),
             input: serde_json::json!({
                 "image": sample_image_json(),
-                "model": "trocr-base-printed-onnx",
+                "model": "trocr-base-printed",
                 "autoDownload": false
             }),
         })
-        .expect("recognize summary");
-        assert_eq!(response.value["executed"], false);
-        assert_eq!(response.value["wasmSupported"], false);
-        assert_eq!(response.value["autoDownload"], false);
+        .expect_err("non ONNX preset");
+        assert!(error.contains("requires an ONNX TrOCR preset"));
     }
 
     #[test]
