@@ -15,11 +15,10 @@ claimed. See [docs/PROVENANCE.md](docs/PROVENANCE.md) and
 
 ## Migration status
 
-The workspace keeps exact registry coordinates in committed package manifests. Normal feature work may activate the exact foundation, NLP, and scene-detection source revisions declared in `.coding-tooling.source-deps.json`; the generated Cargo configuration remains ignored and uncommitted. The checked-in lockfile records registry sources and checksums for the former bootstrap prerequisites
-`moenarch-audio-contracts =0.1.0` and `scenedetect-core =0.1.0`, alongside the
-released foundation and narrow NLP contracts declared in the workspace
-manifest.
+The workspace keeps exact registry coordinates in committed package manifests. Normal feature work may activate only the exact `moenarch-foundation` source revision declared in `.coding-tooling.source-deps.json`; the generated Cargo configuration remains ignored and uncommitted. `moenarch-text-core` and `scenedetect-core` remain registry-level compatibility/adapter dependencies rather than sibling source-workspace requirements.
 
-This records the distribution baseline only; it does not make registry publication a prerequisite for source-mode implementation work and does not replace the separate behavioral verification required for a release. Run `bash scripts/source-deps activate` for the exact source graph and `bash scripts/source-deps deactivate` before registry-only release verification. See [docs/SOURCE_DEVELOPMENT.md](docs/SOURCE_DEVELOPMENT.md).
+This keeps the normal source graph directional: visual capabilities may build on foundation, while NLP enrichment and scene-detection interoperability cross explicit compatibility or adapter seams. `video-analysis-detectors::canonical` remains the concrete adapter around `scenedetect-core`; scene algorithms stay owned by `scenedetect-rs`.
+
+This records the distribution baseline only; it does not make registry publication a prerequisite for source-mode implementation work and does not replace the separate behavioral verification required for a release. Run `bash scripts/source-deps activate` for the exact foundation source graph and `bash scripts/source-deps deactivate` before registry-only release verification. See [docs/SOURCE_DEVELOPMENT.md](docs/SOURCE_DEVELOPMENT.md).
 
 No publication or source removal is authorized by this bootstrap.
