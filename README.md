@@ -8,6 +8,8 @@ The bootstrap freezes source commit
 families: 108 Cargo packages and 54 source-derived Bun packages. A private,
 destination-authored `@moritzbrantner/visual-app-ui` adapter serves the 27 apps.
 
+For the Rust packages assigned to `visual-analysis`, this repository is the canonical source, test, issue, version, and release authority. Historical copies in `rust-packages` are compatibility/provenance material and must not become a competing implementation or publication source. Ownership does not itself authorize publication, tags, or historical source removal.
+
 This extraction is structural. Behavioral, build, test, lint, documentation,
 WASM, package, consumer, and benchmark evidence was deliberately not run or
 claimed. See [docs/PROVENANCE.md](docs/PROVENANCE.md) and
@@ -21,4 +23,4 @@ This keeps the normal source graph directional: visual capabilities may build on
 
 This records the distribution baseline only; it does not make registry publication a prerequisite for source-mode implementation work and does not replace the separate behavioral verification required for a release. Run `bash scripts/source-deps activate` for the exact foundation source graph and `bash scripts/source-deps deactivate` before registry-only release verification. See [docs/SOURCE_DEVELOPMENT.md](docs/SOURCE_DEVELOPMENT.md).
 
-No publication or source removal is authorized by this bootstrap.
+Publication or source removal remains a separate destination-local release/migration operation requiring its normal explicit gates.
