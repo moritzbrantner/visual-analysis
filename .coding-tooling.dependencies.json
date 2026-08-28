@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "repository": {
+    "name": "moritzbrantner/visual-analysis",
+    "layer": "domain"
+  },
+  "dependencies": [
+    {
+      "repository": "moritzbrantner/moenarch-foundation",
+      "layer": "foundation",
+      "relation": "foundation"
+    },
+    {
+      "repository": "moritzbrantner/nlp-stack",
+      "layer": "domain",
+      "relation": "adapter"
+    },
+    {
+      "repository": "moritzbrantner/scenedetect-rs",
+      "layer": "domain",
+      "relation": "adapter"
+    }
+  ],
+  "maxExactSourceRepositories": 1,
+  "legacyRepositories": {
+    "moritzbrantner/rust-packages": "moritzbrantner/visual-analysis"
+  },
+  "graph": {
+    "moritzbrantner/visual-analysis": [
+      "moritzbrantner/moenarch-foundation",
+      "moritzbrantner/nlp-stack",
+      "moritzbrantner/scenedetect-rs"
+    ],
+    "moritzbrantner/moenarch-foundation": [],
+    "moritzbrantner/nlp-stack": ["moritzbrantner/moenarch-foundation"],
+    "moritzbrantner/scenedetect-rs": []
+  }
+}

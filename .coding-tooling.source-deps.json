@@ -62,18 +62,6 @@
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
         "rev": "648e3ef18dc5d32d5fcbb211ed7a118b2731a387",
         "localPath": "../moenarch-foundation/crates/data/tensor-data"
-      },
-      {
-        "package": "moenarch-text-core",
-        "git": "https://github.com/moritzbrantner/nlp-stack",
-        "rev": "7bd8c1ec4f2cbe2cf18538c5046830356a087b46",
-        "localPath": "../nlp-stack/crates/text/text-core"
-      },
-      {
-        "package": "scenedetect-core",
-        "git": "https://github.com/moritzbrantner/scenedetect-rs",
-        "rev": "4b2fb53d9a0c82fdf30aea2710d38b5438d08128",
-        "localPath": "../scenedetect-rs/crates/scenedetect-core"
       }
     ]
   }

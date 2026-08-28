@@ -12,12 +12,13 @@ Read `CONTEXT.md`, `docs/PROVENANCE.md`, `docs/OWNERSHIP.md`, `docs/SOURCE_DEVEL
 
 - Keep exactly the 27 source families classified in the ownership inventory.
 - Do not add ComfyUI or spatial packages, spatial reverse dependencies, sibling repository paths, moving Git dependencies, or rust-packages test support to committed package manifests.
-- Keep exact registry coordinates in package manifests. Normal development temporarily replaces them with the exact local source revisions declared in `.coding-tooling.source-deps.json` through the managed, ignored Cargo configuration.
-- The outer coding workspace owns the declared sibling repositories/worktrees. They must exist at their exact pinned revisions before source activation; do not add private-repository tokens or authenticated Git fallback to hosted CI.
+- Keep exact registry coordinates in package manifests. Normal source development temporarily replaces only the declared `moenarch-foundation` packages through the managed, ignored Cargo configuration.
+- Do not add NLP or scene-detection repositories to the normal source workspace. Existing `text-core` usage is a compatibility/data-contract surface; `scenedetect-core` crosses through explicit detector adapters. New cross-domain behavior belongs in an adapter or consuming application.
+- The outer coding workspace owns the declared foundation worktree. It must exist at its exact pinned revision before source activation; do not add private-repository tokens or authenticated Git fallback to hosted CI.
 - Ordinary feature work is source-first. Do not publish crates, bump package versions, create tags, or start a release train merely to unblock development.
 - Keep package versions stable during source work when compatibility permits; a dedicated release task owns version bumps, publication, and registry-only verification.
 - If a consumer task expands beyond the consumer plus two upstream repositories, treat that as an architecture boundary problem unless broader migration scope was explicitly assigned.
-- Treat `scenedetect-core` as the canonical owner of shared scene algorithms.
+- Treat `scenedetect-core` as the canonical owner of shared scene algorithms; keep `video-analysis-detectors::canonical` as the integration seam rather than copying scene algorithms into visual core.
 - Keep `@moritzbrantner/visual-app-ui` private and destination-owned.
 - Never publish, tag, release, remove monolith source, or merge the bootstrap without a separate exact authorization.
 - Registry-only dependency verification is release evidence; it is not required before exact source-mode implementation evidence is useful.
