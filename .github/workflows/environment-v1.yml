@@ -75,6 +75,13 @@ jobs:
       - name: Prepare declared environment
         run: bash scripts/codex-environment.sh setup
 
+      - name: Inspect setup mutations
+        shell: bash
+        run: |
+          set -euo pipefail
+          git status --short
+          git diff -- bun.lock Cargo.lock
+
       - name: Verify prepared environment fingerprint
         shell: bash
         run: |
