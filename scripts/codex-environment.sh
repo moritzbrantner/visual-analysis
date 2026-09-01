@@ -14,6 +14,7 @@ tooling_dir="$parent/coding-tooling"
 tooling_rev="25cdc38e079a959821317cbf450f2c96e030ce3c"
 onnxruntime_version="1.24.4"
 venv_dir="$HOME/.codex-venvs/visual-analysis"
+cd "$root"
 
 log() {
   printf '[visual-analysis codex] %s\n' "$*"
@@ -153,8 +154,8 @@ path.write_text(text.rstrip() + '\n\n' + block)
 PY
 
 log "installing pinned Bun dependencies"
-bun install --cwd "$tooling_dir" --frozen-lockfile
-bun install --cwd "$root" --frozen-lockfile
+(cd "$tooling_dir" && bun install --frozen-lockfile)
+(cd "$root" && bun install --frozen-lockfile)
 
 log "activating exact source-development graph"
 bash "$root/scripts/source-deps" activate
@@ -164,7 +165,7 @@ cargo fetch --manifest-path "$root/Cargo.toml"
 
 log "running environment preflight"
 cargo metadata --manifest-path "$root/Cargo.toml" --format-version 1 --no-deps >/dev/null
-bun run --cwd "$root" structural:prepare
+(cd "$root" && bun run structural:prepare)
 "$venv_dir/bin/python" -c 'import onnxruntime; print("onnxruntime", onnxruntime.__version__)'
 tesseract --version | head -n 1
 ffmpeg -version | head -n 1
