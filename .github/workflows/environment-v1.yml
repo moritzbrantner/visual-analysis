@@ -34,29 +34,78 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           fetch-depth: 0
+
+      - name: Bootstrap fingerprint tooling runtime
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+
+      - name: Checkout fingerprint verifier
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: moritzbrantner/coding-tooling
+          ref: 029ab00cf58a7115f5901e9d2c9cb03974a185ee
+          path: .ci/coding-tooling
+          persist-credentials: false
+
+      - name: Bootstrap fingerprint verifier
+        run: |
+          cd .ci/coding-tooling
+          bun install --frozen-lockfile
+
+      - name: Capture expected environment fingerprint
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/environment
+          bun .ci/coding-tooling/src/cli.ts environment fingerprint --json \
+            > .artifacts/environment/expected.json
+          expected="$(python3 - <<'PY'
+          import json
+          with open('.artifacts/environment/expected.json', encoding='utf-8') as handle:
+              print(json.load(handle)['data']['fingerprint'])
+          PY
+          )"
+          test -n "$expected"
+          printf 'EXPECTED_ENVIRONMENT_FINGERPRINT=%s\n' "$expected" >> "$GITHUB_ENV"
 
       - name: Prepare declared environment
         run: bash scripts/codex-environment.sh setup
 
-      - name: Verify exact toolchains
+      - name: Verify prepared environment fingerprint
         shell: bash
         run: |
           set -euo pipefail
-          expected_bun="$(node -p "require('./package.json').packageManager.split('@')[1]")"
-          expected_rust="$(python3 - <<'PY'
-          import tomllib
-          with open('rust-toolchain.toml', 'rb') as handle:
-              print(tomllib.load(handle)['toolchain']['channel'])
-          PY
-          )"
-          test "$(bun --version)" = "$expected_bun"
-          test "$(rustc --version | awk '{print $2}')" = "$expected_rust"
+          bun .ci/coding-tooling/src/cli.ts environment verify --json \
+            > .artifacts/environment/receipt.json
+          python3 - <<'PY'
+          import json
+          import os
 
-      - name: Verify source mode remains explicit
-        run: test ! -e .cargo/config.toml
+          expected = os.environ['EXPECTED_ENVIRONMENT_FINGERPRINT']
+          with open('.artifacts/environment/receipt.json', encoding='utf-8') as handle:
+              receipt = json.load(handle)
+
+          assert receipt['status'] == 'passed', receipt
+          assert receipt['data']['expectedFingerprint'] == expected, receipt
+          assert receipt['data']['verifiedFingerprint'] == expected, receipt
+          PY
+
+      - name: Upload environment fingerprint evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: environment-fingerprint-${{ github.sha }}
+          path: .artifacts/environment/*.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove verifier checkout
+        if: always()
+        run: rm -rf .ci
 
       - name: Verify structural baseline
         run: |
