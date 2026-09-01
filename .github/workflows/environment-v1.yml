@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   cold-setup:
@@ -75,26 +75,18 @@ jobs:
       - name: Prepare declared environment
         run: bash scripts/codex-environment.sh setup
 
-      - name: Normalize stale Cargo lock on canary branch
-        id: lock-repair
-        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        shell: bash
+      - name: Require setup to preserve fingerprint inputs
         run: |
-          set -euo pipefail
-          if git diff --quiet -- Cargo.lock; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          git diff -- Cargo.lock
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock
-          git commit -m "chore: refresh Cargo lock for environment setup"
-          git push origin "HEAD:${GITHUB_HEAD_REF}"
-          echo "changed=true" >> "$GITHUB_OUTPUT"
+          git diff --exit-code -- \
+            package.json \
+            bun.lock \
+            rust-toolchain.toml \
+            Cargo.toml \
+            Cargo.lock \
+            .repository-environment.toml \
+            .coding-tooling.source-deps.json
 
       - name: Verify prepared environment fingerprint
-        if: steps.lock-repair.outputs.changed != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -127,7 +119,6 @@ jobs:
         run: rm -rf .ci
 
       - name: Verify structural baseline
-        if: steps.lock-repair.outputs.changed != 'true'
         run: |
           python3 scripts/check_visual_extraction.py --check
-          cargo metadata --format-version 1 --no-deps > /dev/null
+          cargo metadata --locked --format-version 1 --no-deps > /dev/null
