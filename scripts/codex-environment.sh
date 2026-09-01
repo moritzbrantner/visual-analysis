@@ -23,6 +23,12 @@ run_privileged() {
   fi
 }
 
+publish_path() {
+  if [[ -n "${GITHUB_PATH:-}" ]]; then
+    printf '%s\n' "$1" >> "$GITHUB_PATH"
+  fi
+}
+
 if [[ "$mode" == "setup" ]] && command -v apt-get >/dev/null 2>&1; then
   mapfile -t apt_packages < <(python3 - "$config" <<'PY'
 import sys, tomllib
@@ -56,6 +62,7 @@ if [[ -n "$desired_bun" ]]; then
     curl -fsSL https://bun.sh/install | bash -s "bun-v${desired_bun}"
   fi
   export PATH="$HOME/.bun/bin:$PATH"
+  publish_path "$HOME/.bun/bin"
 fi
 
 rust_toolchain="$(python3 - "$root/rust-toolchain.toml" <<'PY'
@@ -74,6 +81,9 @@ if [[ -n "$rust_toolchain" ]]; then
   if ! command -v rustup >/dev/null 2>&1; then
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
     export PATH="$HOME/.cargo/bin:$PATH"
+  fi
+  if [[ -d "$HOME/.cargo/bin" ]]; then
+    publish_path "$HOME/.cargo/bin"
   fi
   rustup toolchain install "$rust_toolchain" --profile minimal
   mapfile -t rust_components < <(python3 - "$root/rust-toolchain.toml" <<'PY'
