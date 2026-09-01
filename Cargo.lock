@@ -1337,6 +1337,7 @@ name = "moenarch-image-analysis-detection"
 version = "0.1.0"
 dependencies = [
  "moenarch-image-analysis-core",
+ "moenarch-image-analysis-io",
  "moenarch-image-analysis-processing",
  "moenarch-image-analysis-segmentation",
  "moenarch-model-runtime",

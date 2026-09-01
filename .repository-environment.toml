@@ -7,10 +7,10 @@ track = "latest-stable"
 apt = []
 
 [setup]
-commands = ["bun install --frozen-lockfile", "cargo fetch"]
+commands = ["bun install --frozen-lockfile", "cargo fetch --locked"]
 
 [maintenance]
-commands = ["bun install --frozen-lockfile", "cargo fetch"]
+commands = ["bun install --frozen-lockfile", "cargo fetch --locked"]
 
 [cache]
 paths = ["~/.cargo", "~/.bun/install/cache"]
