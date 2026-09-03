@@ -14,11 +14,12 @@ use serde::Deserialize;
 use video_analysis_core::BoundingBox;
 
 use crate::{
-    ColorBlobDetectionOptions, ColorBlobDetector, FaceDetectionPreset, ImageDetection,
-    OnnxObjectDetector, TargetColor,
+    ColorBlobDetectionOptions, ColorBlobDetector, FaceDetection, FaceDetectionPreset,
+    FaceDetectorBackend, ImageDetection, OnnxFaceDetector, OnnxObjectDetector, TargetColor,
 };
 
 const DEFAULT_DETECTION_MODEL: &str = "xenova-detr-resnet-50-onnx";
+const DEFAULT_FACE_DETECTION_MODEL: &str = "opencv-yunet-onnx";
 
 /// Returns the package surface exposed by every transport wrapper.
 pub fn package_surface() -> PackageSurface {
@@ -30,7 +31,7 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "describe",
                 "Describe package",
-                "Canonical image detection types, native DETR execution, and mask-proposal adapters for video-analysis.",
+                "Canonical image detection types, native DETR/YuNet execution, and mask-proposal adapters for video-analysis.",
                 serde_json::json!({"includeOperations": true}),
             ),
             operation(
@@ -38,6 +39,12 @@ pub fn package_surface() -> PackageSurface {
                 "Detect objects",
                 "Runs local ONNX DETR object detection against an in-memory image payload or local image path. Model downloads remain opt-in through autoDownload.",
                 serde_json::json!({"image": sample_image_json(), "model": DEFAULT_DETECTION_MODEL, "autoDownload": false, "minScore": 0.5, "limit": 20}),
+            ),
+            operation(
+                "image.detection.detectFaces",
+                "Detect faces",
+                "Runs local OpenCV YuNet ONNX face detection against an in-memory image payload or local image path. Model downloads remain opt-in through autoDownload.",
+                serde_json::json!({"image": sample_image_json(), "model": DEFAULT_FACE_DETECTION_MODEL, "autoDownload": false, "limit": 20}),
             ),
             operation(
                 "image.detection.colorBlob",
@@ -78,7 +85,7 @@ fn operation(
         wasm_supported: true,
         server_supported: true,
     };
-    if id == "image.detection.detect" {
+    if matches!(id, "image.detection.detect" | "image.detection.detectFaces") {
         let plan = model_execution_plan(id);
         operation.input_schema["xExecutionPlan"] =
             runtime_core::surface_execution_plan_value(&plan);
@@ -102,7 +109,7 @@ fn model_execution_plan(operation: &str) -> SurfaceExecutionPlan {
             SurfaceSideEffect::Network,
         ],
         cancellable: false,
-        progress_unit: Some("objects".to_string()),
+        progress_unit: Some("detections".to_string()),
         expected_artifacts: Vec::new(),
         requirements: vec![
             RuntimeRequirement {
@@ -129,11 +136,11 @@ fn model_execution_plan(operation: &str) -> SurfaceExecutionPlan {
 
 fn landscape_contract(id: &str) -> Option<runtime_core::landscape::LandscapeOperationContract> {
     match id {
-        "image.detection.detect" | "image.detection.colorBlob" => {
-            let function = if id == "image.detection.detect" {
-                "image.detection.detect"
-            } else {
-                "image.detection.detectColorBlob"
+        "image.detection.detect" | "image.detection.detectFaces" | "image.detection.colorBlob" => {
+            let function = match id {
+                "image.detection.detect" => "image.detection.detect",
+                "image.detection.detectFaces" => "image.detection.detectFaces",
+                _ => "image.detection.detectColorBlob",
             };
             Some(runtime_core::landscape::LandscapeOperationContract::new(
                 runtime_core::landscape::LandscapeFunction::new(function, env!("CARGO_PKG_NAME"))
@@ -165,6 +172,7 @@ pub fn run_surface_operation(request: SurfaceRequest) -> Result<SurfaceResponse,
     let value = match request.operation.as_str() {
         "describe" => return Ok(describe_surface_response(&surface, request)),
         "image.detection.detect" => detect_value(parse_input(request.input)?)?,
+        "image.detection.detectFaces" => detect_faces_value(parse_input(request.input)?)?,
         "image.detection.colorBlob" => color_blob_value(parse_input(request.input)?)?,
         "image.detection.models" => models_value(),
         "image.detection.boxSummary" => box_summary_value(parse_input(request.input)?)?,
@@ -197,6 +205,23 @@ struct DetectRequest {
     model_root: Option<String>,
     #[serde(default)]
     min_score: Option<f32>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FaceDetectRequest {
+    #[serde(default)]
+    image: Option<ImagePayload>,
+    #[serde(default)]
+    image_path: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    auto_download: Option<bool>,
+    #[serde(default)]
+    model_root: Option<String>,
     #[serde(default)]
     limit: Option<usize>,
 }
@@ -238,12 +263,11 @@ struct BoxPayload {
 }
 
 fn detect_value(request: DetectRequest) -> Result<serde_json::Value, String> {
-    if request.image.is_some() && request.image_path.is_some() {
-        return Err("image.detection.detect accepts either image or imagePath, not both".to_string());
-    }
-    if request.image.is_none() && request.image_path.is_none() {
-        return Err("image.detection.detect requires image or imagePath".to_string());
-    }
+    validate_image_source(
+        "image.detection.detect",
+        request.image.as_ref(),
+        request.image_path.as_deref(),
+    )?;
 
     let model = request
         .model
@@ -265,17 +289,11 @@ fn detect_value(request: DetectRequest) -> Result<serde_json::Value, String> {
 
     let auto_download = request.auto_download.unwrap_or(false);
     let spec = ModelPreset::XenovaDetrResnet50Onnx.spec();
-    let mut bundle_options = ModelBundleResolveOptions {
+    let (bundle, bundle_path) = resolve_bundle(
+        &spec,
         auto_download,
-        download_progress: auto_download,
-        ..ModelBundleResolveOptions::default()
-    };
-    if let Some(model_root) = request.model_root.as_deref() {
-        bundle_options.bundle_root = PathBuf::from(model_root);
-    }
-    let bundle_path = bundle_options.bundle_root.display().to_string();
-    let bundle = model_runtime::resolve_or_download_bundle(&spec, &bundle_options)
-        .map_err(|error| error.to_string())?;
+        request.model_root.as_deref(),
+    )?;
     let mut detector = OnnxObjectDetector::from_bundle(bundle).map_err(|error| error.to_string())?;
     detector.score_threshold = min_score;
 
@@ -317,6 +335,113 @@ fn detect_value(request: DetectRequest) -> Result<serde_json::Value, String> {
     }))
 }
 
+fn detect_faces_value(request: FaceDetectRequest) -> Result<serde_json::Value, String> {
+    validate_image_source(
+        "image.detection.detectFaces",
+        request.image.as_ref(),
+        request.image_path.as_deref(),
+    )?;
+
+    let model = request
+        .model
+        .unwrap_or_else(|| DEFAULT_FACE_DETECTION_MODEL.to_string());
+    if model != DEFAULT_FACE_DETECTION_MODEL {
+        return Err(format!(
+            "unsupported face detection model `{model}`; expected `{DEFAULT_FACE_DETECTION_MODEL}`"
+        ));
+    }
+    let limit = request.limit.unwrap_or(100);
+    if limit == 0 {
+        return Err("face detection limit must be greater than zero".to_string());
+    }
+
+    let auto_download = request.auto_download.unwrap_or(false);
+    let spec = FaceDetectionPreset::OpenCvYuNet.model_spec();
+    let (bundle, bundle_path) = resolve_bundle(
+        &spec,
+        auto_download,
+        request.model_root.as_deref(),
+    )?;
+    let mut detector = OnnxFaceDetector::from_bundle(bundle).map_err(|error| error.to_string())?;
+
+    let (mut detections, width, height) = if let Some(image) = request.image {
+        let view = image.view().map_err(|error| error.to_string())?;
+        let width = view.width;
+        let height = view.height;
+        let detections = detector
+            .detect_faces(&view)
+            .map_err(|error| error.to_string())?;
+        (detections, width, height)
+    } else {
+        let image_path = request.image_path.expect("validated imagePath");
+        let image = image_analysis_io::read_image(&image_path)
+            .map_err(|error| format!("failed to read face detection image `{image_path}`: {error}"))?;
+        let view = image.as_view();
+        let width = view.width;
+        let height = view.height;
+        let detections = detector
+            .detect_faces(&view)
+            .map_err(|error| error.to_string())?;
+        (detections, width, height)
+    };
+    detections.sort_by(|left, right| right.confidence.total_cmp(&left.confidence));
+    detections.truncate(limit);
+
+    Ok(serde_json::json!({
+        "executed": true,
+        "nativeOnly": true,
+        "cliSupported": true,
+        "wasmSupported": false,
+        "serverSupported": true,
+        "count": detections.len(),
+        "detections": detections
+            .iter()
+            .map(|detection| face_detection_json(detection, width, height))
+            .collect::<Vec<_>>(),
+        "imageSize": {"width": width, "height": height},
+        "modelId": DEFAULT_FACE_DETECTION_MODEL,
+        "bundlePath": bundle_path,
+        "runtime": "onnx",
+        "autoDownload": auto_download,
+        "limit": limit
+    }))
+}
+
+fn validate_image_source(
+    operation: &str,
+    image: Option<&ImagePayload>,
+    image_path: Option<&str>,
+) -> Result<(), String> {
+    if image.is_some() && image_path.is_some() {
+        return Err(format!(
+            "{operation} accepts either image or imagePath, not both"
+        ));
+    }
+    if image.is_none() && image_path.is_none() {
+        return Err(format!("{operation} requires image or imagePath"));
+    }
+    Ok(())
+}
+
+fn resolve_bundle(
+    spec: &model_runtime::HuggingFaceModelSpec,
+    auto_download: bool,
+    model_root: Option<&str>,
+) -> Result<(model_runtime::ModelBundle, String), String> {
+    let mut bundle_options = ModelBundleResolveOptions {
+        auto_download,
+        download_progress: auto_download,
+        ..ModelBundleResolveOptions::default()
+    };
+    if let Some(model_root) = model_root {
+        bundle_options.bundle_root = PathBuf::from(model_root);
+    }
+    let bundle_path = bundle_options.bundle_root.display().to_string();
+    let bundle = model_runtime::resolve_or_download_bundle(spec, &bundle_options)
+        .map_err(|error| error.to_string())?;
+    Ok((bundle, bundle_path))
+}
+
 fn detection_json(detection: &ImageDetection) -> serde_json::Value {
     serde_json::json!({
         "label": &detection.label,
@@ -327,6 +452,44 @@ fn detection_json(detection: &ImageDetection) -> serde_json::Value {
             "width": detection.region.width,
             "height": detection.region.height
         },
+        "attributes": &detection.attributes
+    })
+}
+
+fn face_detection_json(
+    detection: &FaceDetection,
+    image_width: u32,
+    image_height: u32,
+) -> serde_json::Value {
+    let width = image_width as f32;
+    let height = image_height as f32;
+    let x = (detection.bbox.x * width).floor().clamp(0.0, width) as u32;
+    let y = (detection.bbox.y * height).floor().clamp(0.0, height) as u32;
+    let max_x = ((detection.bbox.x + detection.bbox.width) * width)
+        .ceil()
+        .clamp(0.0, width) as u32;
+    let max_y = ((detection.bbox.y + detection.bbox.height) * height)
+        .ceil()
+        .clamp(0.0, height) as u32;
+    let pixel_width = max_x.saturating_sub(x);
+    let pixel_height = max_y.saturating_sub(y);
+
+    serde_json::json!({
+        "label": "face",
+        "score": detection.confidence,
+        "region": {
+            "x": x,
+            "y": y,
+            "width": pixel_width,
+            "height": pixel_height
+        },
+        "normalizedRegion": {
+            "x": detection.bbox.x,
+            "y": detection.bbox.y,
+            "width": detection.bbox.width,
+            "height": detection.bbox.height
+        },
+        "landmarks": detection.landmarks.as_ref().map(|landmarks| &landmarks.points),
         "attributes": &detection.attributes
     })
 }
@@ -367,14 +530,14 @@ fn models_value() -> serde_json::Value {
                 "operation": "image.detection.detect"
             },
             {
-                "id": "opencv-yunet-onnx",
+                "id": DEFAULT_FACE_DETECTION_MODEL,
                 "task": face_spec.task.as_protocol_str(),
                 "repoId": face_spec.repo_id_value(),
                 "revision": face_spec.revision_value(),
                 "name": face_spec.name,
                 "files": face_spec.files,
-                "supported": false,
-                "fallback": "image.detection.colorBlob"
+                "supported": cfg!(feature = "onnx"),
+                "operation": "image.detection.detectFaces"
             }
         ],
         "deterministicFallbacks": [{
@@ -463,6 +626,7 @@ mod tests {
             .map(|operation| operation.id.0)
             .collect::<Vec<_>>();
         assert!(ids.contains(&"image.detection.detect".to_string()));
+        assert!(ids.contains(&"image.detection.detectFaces".to_string()));
         assert!(ids.contains(&"image.detection.colorBlob".to_string()));
         assert!(ids.contains(&"image.detection.models".to_string()));
     }
@@ -472,6 +636,16 @@ mod tests {
         let error = run_surface_operation(SurfaceRequest {
             operation: OperationId::new("image.detection.detect"),
             input: serde_json::json!({"model": DEFAULT_DETECTION_MODEL}),
+        })
+        .expect_err("missing image");
+        assert!(error.contains("requires image or imagePath"));
+    }
+
+    #[test]
+    fn face_detect_requires_exactly_one_image_source() {
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("image.detection.detectFaces"),
+            input: serde_json::json!({"model": DEFAULT_FACE_DETECTION_MODEL}),
         })
         .expect_err("missing image");
         assert!(error.contains("requires image or imagePath"));
@@ -492,6 +666,20 @@ mod tests {
     }
 
     #[test]
+    fn face_detect_rejects_unsupported_model_before_bundle_resolution() {
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("image.detection.detectFaces"),
+            input: serde_json::json!({
+                "image": sample_image_json(),
+                "model": "other-face-model",
+                "autoDownload": false
+            }),
+        })
+        .expect_err("unsupported model");
+        assert!(error.contains("unsupported face detection model"));
+    }
+
+    #[test]
     fn detect_rejects_invalid_threshold_before_bundle_resolution() {
         let error = run_surface_operation(SurfaceRequest {
             operation: OperationId::new("image.detection.detect"),
@@ -503,6 +691,35 @@ mod tests {
         })
         .expect_err("invalid threshold");
         assert!(error.contains("between 0 and 1"));
+    }
+
+    #[test]
+    fn face_detect_rejects_zero_limit_before_bundle_resolution() {
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("image.detection.detectFaces"),
+            input: serde_json::json!({
+                "image": sample_image_json(),
+                "limit": 0,
+                "autoDownload": false
+            }),
+        })
+        .expect_err("invalid limit");
+        assert!(error.contains("greater than zero"));
+    }
+
+    #[test]
+    fn face_json_exposes_pixel_and_normalized_regions() {
+        let detection = FaceDetection::new(
+            crate::FaceBox::new(0.25, 0.5, 0.5, 0.25).expect("box"),
+            0.95,
+        )
+        .expect("detection");
+        let value = face_detection_json(&detection, 200, 100);
+        assert_eq!(value["region"]["x"], 50);
+        assert_eq!(value["region"]["y"], 50);
+        assert_eq!(value["region"]["width"], 100);
+        assert_eq!(value["region"]["height"], 25);
+        assert_eq!(value["normalizedRegion"]["x"], 0.25);
     }
 
     #[test]
@@ -545,6 +762,11 @@ mod tests {
         })
         .expect("models");
         assert_eq!(response.value["models"][0]["id"], DEFAULT_DETECTION_MODEL);
+        assert_eq!(response.value["models"][1]["id"], DEFAULT_FACE_DETECTION_MODEL);
+        assert_eq!(
+            response.value["models"][1]["operation"],
+            "image.detection.detectFaces"
+        );
     }
 
     #[test]

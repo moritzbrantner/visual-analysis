@@ -19,6 +19,7 @@ name = "image_analysis_embeddings"
 runtime-core.workspace = true
 image-analysis-core.workspace = true
 image-analysis-detection.workspace = true
+image-analysis-io.workspace = true
 image-analysis-processing.workspace = true
 image-analysis-ocr.workspace = true
 image-analysis-segmentation.workspace = true

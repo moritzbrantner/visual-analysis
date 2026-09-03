@@ -1,6 +1,6 @@
 # image-analysis-detection
 
-Object detection built from native ONNX inference, image segmentation masks, and deterministic color-blob detection.
+Object and face detection built from native ONNX inference, image segmentation masks, and deterministic color-blob detection.
 
 ## Feature flags
 
@@ -9,13 +9,14 @@ Object detection built from native ONNX inference, image segmentation masks, and
 
 ## Runtime Surface
 
-- Primary workflow: `image.detection.detect` runs the `Xenova/detr-resnet-50` ONNX preset against an in-memory image payload or `imagePath`. `autoDownload` remains opt-in and model bundles default to `.model-runtime`.
-- Workflow operation `image.detection.colorBlob` keeps the deterministic in-memory red-blob detector as a lightweight fallback.
-- Debug operations: `image.detection.models`, `image.detection.boxSummary`, and `describe` inspect model metadata and imported boxes without running a detector.
-- CLI and server adapters enable `onnx`. WASM keeps deterministic/imported workflows but does not execute DETR.
-- YuNet face-detection primitives remain available at the library level but are not promoted to the standard runtime surface in this slice.
+- `image.detection.detect` runs the `Xenova/detr-resnet-50` ONNX preset against an in-memory image payload or `imagePath`.
+- `image.detection.detectFaces` runs the OpenCV YuNet ONNX face detector against the same input contract. Face results expose pixel `region` values plus a `normalizedRegion` and normalized landmarks so downstream video/corpus adapters can preserve an explicit coordinate space.
+- Model downloads remain opt-in through `autoDownload`; model bundles default to `.model-runtime`.
+- `image.detection.colorBlob` keeps the deterministic in-memory red-blob detector as a lightweight object-detection fallback.
+- Debug operations `image.detection.models`, `image.detection.boxSummary`, and `describe` inspect model metadata and imported boxes without running a detector.
+- CLI and server adapters enable `onnx`. WASM keeps deterministic/imported workflows but does not execute DETR or YuNet.
 
-The semantic external test runs the standard `image.detection.detect` surface against a pinned Hugging Face COCO fixture and requires high-confidence cat detections on both sides of the image.
+The semantic external object-detection test runs `image.detection.detect` against a pinned Hugging Face COCO fixture and requires high-confidence cat detections on both sides of the image. YuNet model execution remains local/native and is covered structurally by the runtime-surface and ONNX decoding tests unless an explicit external face fixture is supplied.
 
 ## Related crates
 
