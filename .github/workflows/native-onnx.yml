@@ -9,6 +9,9 @@ on:
       - "crates/image/image-analysis-detection/**"
       - "crates/image/image-analysis-detection-cli/**"
       - "crates/image/image-analysis-detection-server/**"
+      - "crates/image/image-analysis-embeddings/**"
+      - "crates/image/image-analysis-embeddings-cli/**"
+      - "crates/image/image-analysis-embeddings-server/**"
       - "tests/fixtures/ocr/**"
       - "scripts/setup_visual_acceptance_fixtures.sh"
       - ".github/workflows/native-onnx.yml"
@@ -23,6 +26,9 @@ on:
       - "crates/image/image-analysis-detection/**"
       - "crates/image/image-analysis-detection-cli/**"
       - "crates/image/image-analysis-detection-server/**"
+      - "crates/image/image-analysis-embeddings/**"
+      - "crates/image/image-analysis-embeddings-cli/**"
+      - "crates/image/image-analysis-embeddings-server/**"
       - "tests/fixtures/ocr/**"
       - "scripts/setup_visual_acceptance_fixtures.sh"
       - ".github/workflows/native-onnx.yml"
@@ -76,6 +82,11 @@ jobs:
               raise SystemExit(f"ONNX Runtime shared library not found under {capi}")
           print(f"ORT_DYLIB_PATH={candidates[0]}")
           PY
+
+      - name: Verify face runtime surface units
+        run: |
+          cargo test -p moenarch-image-analysis-detection --features onnx --lib
+          cargo test -p moenarch-image-analysis-embeddings --features onnx --lib
 
       - name: Prepare semantic image fixtures
         run: bash scripts/setup_visual_acceptance_fixtures.sh
