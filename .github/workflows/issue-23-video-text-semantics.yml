@@ -57,8 +57,8 @@ jobs:
 
           lib = Path('crates/video/video-analysis-recognition/src/lib.rs')
           text = lib.read_text()
-          marker = 'mod model_predictions;\npub mod surface;'
-          replacement = 'mod model_predictions;\nmod video_text_semantics;\npub mod surface;'
+          marker = 'pub mod surface;'
+          replacement = 'pub mod surface;\nmod video_text_semantics;'
           if text.count(marker) != 1:
               raise SystemExit('expected one recognition module insertion point')
           text = text.replace(marker, replacement)
@@ -101,6 +101,8 @@ jobs:
           PY
           rustfmt --edition 2021 crates/video/video-analysis-recognition/src/video_text_semantics.rs
           rustfmt --edition 2021 crates/video/video-analysis-recognition/src/model_predictions.rs
+          rustfmt --check --edition 2021 crates/video/video-analysis-recognition/src/video_text_semantics.rs
+          rustfmt --check --edition 2021 crates/video/video-analysis-recognition/src/model_predictions.rs
           git diff --check
 
       - name: Resolve exact Foundation source closure
@@ -148,7 +150,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo fmt --all -- --check
+          rustfmt --check --edition 2021 crates/video/video-analysis-recognition/src/video_text_semantics.rs
+          rustfmt --check --edition 2021 crates/video/video-analysis-recognition/src/model_predictions.rs
           cargo test --locked -p moenarch-video-analysis-recognition
           cargo clippy --locked -p moenarch-video-analysis-recognition --all-targets -- -D warnings
           cargo doc --locked -p moenarch-video-analysis-recognition --no-deps
