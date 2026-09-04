@@ -1,0 +1,156 @@
+name: Issue 23 video text semantics
+
+on:
+  push:
+    branches:
+      - feat/23-video-text-semantics
+    paths:
+      - .github/workflows/issue-23-video-text-semantics.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CODING_TOOLING_REV: 7f63dade760bfb1020c69d1a0ac7319cbbdf91ab
+      FOUNDATION_REV: b7533cd02269124deece75b76477ca55a853cd77
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          ref: feat/23-video-text-semantics
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: 1.95.0
+          components: rustfmt,clippy
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+
+      - name: Prepare exact Foundation source graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init ../coding-tooling
+          git -C ../coding-tooling fetch --depth=1 https://github.com/moritzbrantner/coding-tooling.git "$CODING_TOOLING_REV"
+          git -C ../coding-tooling checkout --detach FETCH_HEAD
+          (cd ../coding-tooling && bun install --frozen-lockfile)
+
+          git init ../moenarch-foundation
+          git -C ../moenarch-foundation fetch --depth=1 https://github.com/moritzbrantner/moenarch-foundation.git "$FOUNDATION_REV"
+          git -C ../moenarch-foundation checkout --detach FETCH_HEAD
+
+          bash scripts/source-deps activate
+
+      - name: Wire recognition module
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/video/video-analysis-recognition/src/lib.rs')
+          text = path.read_text()
+          marker = 'mod model_predictions;\npub mod surface;'
+          replacement = 'mod model_predictions;\nmod video_text_semantics;\npub mod surface;'
+          if text.count(marker) != 1:
+              raise SystemExit('expected one recognition module insertion point')
+          text = text.replace(marker, replacement)
+
+          marker = 'pub use model_predictions::*;'
+          replacement = 'pub use model_predictions::*;\npub use video_text_semantics::*;'
+          if text.count(marker) != 1:
+              raise SystemExit('expected one recognition export insertion point')
+          path.write_text(text.replace(marker, replacement))
+
+          semantic = Path('crates/video/video-analysis-recognition/src/video_text_semantics.rs')
+          semantic_text = semantic.read_text().replace(
+              'matches!(observation.kind, ObservationKind::Text)',
+              'matches!(&observation.kind, ObservationKind::Text)',
+          )
+          semantic.write_text(semantic_text)
+          PY
+          rustfmt --edition 2021 crates/video/video-analysis-recognition/src/video_text_semantics.rs
+          git diff --check
+
+      - name: Resolve semantic-core without dependency drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp Cargo.lock /tmp/Cargo.lock.before
+          cargo check -p moenarch-video-analysis-recognition
+          python3 - <<'PY'
+          import tomllib
+          from pathlib import Path
+
+          before = tomllib.loads(Path('/tmp/Cargo.lock.before').read_text())
+          after = tomllib.loads(Path('Cargo.lock').read_text())
+
+          def keyed(doc):
+              return {
+                  (p['name'], p['version'], p.get('source')): p
+                  for p in doc.get('package', [])
+              }
+
+          old = keyed(before)
+          new = keyed(after)
+          removed = sorted(set(old) - set(new))
+          added = sorted(set(new) - set(old))
+          if removed:
+              raise SystemExit(f'lock resolution removed packages: {removed}')
+          unexpected_added = [key for key in added if key[0] != 'moenarch-semantic-core']
+          if unexpected_added:
+              raise SystemExit(f'lock resolution added unrelated packages: {unexpected_added}')
+          semantic = [key for key in added if key[0] == 'moenarch-semantic-core']
+          if len(semantic) != 1 or semantic[0][1] != '0.1.0':
+              raise SystemExit(f'expected one semantic-core 0.1.0 package, got {semantic}')
+
+          changed = []
+          for key in sorted(set(old) & set(new)):
+              if old[key] != new[key]:
+                  if key[0] != 'moenarch-video-analysis-recognition':
+                      changed.append(key)
+                  else:
+                      before_deps = set(old[key].get('dependencies', []))
+                      after_deps = set(new[key].get('dependencies', []))
+                      if after_deps - before_deps != {'moenarch-semantic-core'} or before_deps - after_deps:
+                          changed.append(key)
+          if changed:
+              raise SystemExit(f'lock resolution changed unrelated package records: {changed}')
+          PY
+          git diff --check
+
+      - name: Focused semantic verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          cargo test --locked -p moenarch-video-analysis-recognition
+          cargo clippy --locked -p moenarch-video-analysis-recognition --all-targets -- -D warnings
+          cargo doc --locked -p moenarch-video-analysis-recognition --no-deps
+          python3 scripts/check_visual_extraction.py --preparation-only
+          cargo metadata --locked --format-version 1 --no-deps >/dev/null
+          git diff --check
+
+      - name: Commit generated integration changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add Cargo.lock crates/video/video-analysis-recognition/src/lib.rs crates/video/video-analysis-recognition/src/video_text_semantics.rs
+          if git diff --cached --quiet; then
+            echo 'No generated changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Implement scene-aware video text semantics'
+          git push origin HEAD:feat/23-video-text-semantics
+
+      - name: Deactivate source dependencies
+        if: always()
+        run: bash scripts/source-deps deactivate || true
