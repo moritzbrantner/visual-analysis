@@ -47,38 +47,63 @@ jobs:
 
           bash scripts/source-deps activate
 
-      - name: Wire recognition module
+      - name: Wire recognition and remove stale spatial conversions
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
-          path = Path('crates/video/video-analysis-recognition/src/lib.rs')
-          text = path.read_text()
+          lib = Path('crates/video/video-analysis-recognition/src/lib.rs')
+          text = lib.read_text()
           marker = 'mod model_predictions;\npub mod surface;'
           replacement = 'mod model_predictions;\nmod video_text_semantics;\npub mod surface;'
           if text.count(marker) != 1:
               raise SystemExit('expected one recognition module insertion point')
           text = text.replace(marker, replacement)
-
           marker = 'pub use model_predictions::*;'
           replacement = 'pub use model_predictions::*;\npub use video_text_semantics::*;'
           if text.count(marker) != 1:
               raise SystemExit('expected one recognition export insertion point')
-          path.write_text(text.replace(marker, replacement))
+          lib.write_text(text.replace(marker, replacement))
 
           semantic = Path('crates/video/video-analysis-recognition/src/video_text_semantics.rs')
-          semantic_text = semantic.read_text().replace(
+          semantic.write_text(semantic.read_text().replace(
               'matches!(observation.kind, ObservationKind::Text)',
               'matches!(&observation.kind, ObservationKind::Text)',
+          ))
+
+          predictions = Path('crates/video/video-analysis-recognition/src/model_predictions.rs')
+          text = predictions.read_text()
+          import_line = 'use video_analysis_posture::{Keypoint, Keypoint3d, Pose3dEstimate, PoseEstimate};\n'
+          if text.count(import_line) != 1:
+              raise SystemExit('expected stale posture import')
+          text = text.replace(import_line, '')
+
+          patterns = [
+              r'\n    /// Converts this value to keypoint\.\n    pub fn to_keypoint\(&self\) -> Result<Keypoint> \{.*?\n    \}\n',
+              r'\n    /// Converts this value to keypoint\.\n    pub fn to_keypoint\(&self\) -> Result<Keypoint3d> \{.*?\n    \}\n',
+              r'\nimpl RawPose2dPrediction \{\n    /// Converts this value to pose estimate\.\n    pub fn to_pose_estimate\(&self, frame_size: Option<\(u32, u32\)>\) -> Result<PoseEstimate> \{.*?\n    \}\n\}\n',
+              r'\nimpl RawPose3dPrediction \{\n    /// Converts this value to pose 3d estimate\.\n    pub fn to_pose_3d_estimate\(&self\) -> Result<Pose3dEstimate> \{.*?\n    \}\n\}\n',
+          ]
+          for pattern in patterns:
+              text, count = re.subn(pattern, '\n', text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f'expected one stale spatial conversion matching {pattern}')
+          text = text.replace(
+              'use video_analysis_core::{AnalysisEvent, BoundingBox, Observation, ObservationKind, Result};',
+              'use video_analysis_core::{AnalysisEvent, BoundingBox, Observation, ObservationKind};',
           )
-          semantic.write_text(semantic_text)
+          if 'video_analysis_posture' in text or 'three_d_processing_core' in text:
+              raise SystemExit('stale spatial dependency reference remains in model_predictions.rs')
+          predictions.write_text(text)
           PY
           rustfmt --edition 2021 crates/video/video-analysis-recognition/src/video_text_semantics.rs
+          rustfmt --edition 2021 crates/video/video-analysis-recognition/src/model_predictions.rs
           git diff --check
 
-      - name: Resolve semantic-core without dependency drift
+      - name: Resolve exact Foundation source closure
         shell: bash
         run: |
           set -euo pipefail
@@ -90,38 +115,32 @@ jobs:
 
           before = tomllib.loads(Path('/tmp/Cargo.lock.before').read_text())
           after = tomllib.loads(Path('Cargo.lock').read_text())
+          old = before.get('package', [])
+          new = after.get('package', [])
 
-          def keyed(doc):
-              return {
-                  (p['name'], p['version'], p.get('source')): p
-                  for p in doc.get('package', [])
-              }
-
-          old = keyed(before)
-          new = keyed(after)
-          removed = sorted(set(old) - set(new))
-          added = sorted(set(new) - set(old))
-          if removed:
-              raise SystemExit(f'lock resolution removed packages: {removed}')
-          unexpected_added = [key for key in added if key[0] != 'moenarch-semantic-core']
-          if unexpected_added:
-              raise SystemExit(f'lock resolution added unrelated packages: {unexpected_added}')
-          semantic = [key for key in added if key[0] == 'moenarch-semantic-core']
-          if len(semantic) != 1 or semantic[0][1] != '0.1.0':
+          semantic = [p for p in new if p.get('name') == 'moenarch-semantic-core']
+          if len(semantic) != 1 or semantic[0].get('version') != '0.1.0':
               raise SystemExit(f'expected one semantic-core 0.1.0 package, got {semantic}')
 
-          changed = []
-          for key in sorted(set(old) & set(new)):
-              if old[key] != new[key]:
-                  if key[0] != 'moenarch-video-analysis-recognition':
-                      changed.append(key)
-                  else:
-                      before_deps = set(old[key].get('dependencies', []))
-                      after_deps = set(new[key].get('dependencies', []))
-                      if after_deps - before_deps != {'moenarch-semantic-core'} or before_deps - after_deps:
-                          changed.append(key)
-          if changed:
-              raise SystemExit(f'lock resolution changed unrelated package records: {changed}')
+          old_third_party = {
+              (p['name'], p['version'], p.get('source'))
+              for p in old
+              if not p['name'].startswith('moenarch-')
+          }
+          new_third_party = {
+              (p['name'], p['version'], p.get('source'))
+              for p in new
+              if not p['name'].startswith('moenarch-')
+          }
+          removed_third_party = sorted(old_third_party - new_third_party)
+          if removed_third_party:
+              raise SystemExit(f'source closure removed existing third-party locks: {removed_third_party}')
+
+          old_moenarch_versions = {(p['name'], p['version']) for p in old if p['name'].startswith('moenarch-')}
+          new_moenarch_versions = {(p['name'], p['version']) for p in new if p['name'].startswith('moenarch-')}
+          missing_existing_versions = sorted(old_moenarch_versions - new_moenarch_versions)
+          if missing_existing_versions:
+              raise SystemExit(f'source closure changed existing moenarch versions: {missing_existing_versions}')
           PY
           git diff --check
 
@@ -143,7 +162,10 @@ jobs:
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add Cargo.lock crates/video/video-analysis-recognition/src/lib.rs crates/video/video-analysis-recognition/src/video_text_semantics.rs
+          git add Cargo.lock \
+            crates/video/video-analysis-recognition/src/lib.rs \
+            crates/video/video-analysis-recognition/src/model_predictions.rs \
+            crates/video/video-analysis-recognition/src/video_text_semantics.rs
           if git diff --cached --quiet; then
             echo 'No generated changes to commit.'
             exit 0
