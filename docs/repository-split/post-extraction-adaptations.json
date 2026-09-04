@@ -20,7 +20,6 @@
     "crates/image/image-analysis-ocr/src/lib.rs",
     "crates/image/image-analysis-ocr/src/surface.rs",
     "crates/image/image-analysis-ocr/tests/external_onnx_smoke.rs",
-    "crates/video/video-analysis-recognition/Cargo.toml",
     "crates/video/video-analysis-recognition/src/lib.rs",
     "crates/video/video-analysis-recognition/src/model_analyzers.rs",
     "crates/video/video-analysis-recognition/src/model_predictions.rs"
