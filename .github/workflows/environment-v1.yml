@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 env:
-  CODING_TOOLING_REV: 7f63dade760bfb1020c69d1a0ac7319cbbdf91ab
+  CODING_TOOLING_REV: 0c4cf3d19ec62c03002fd123bc7c2d0dcdd02628
 
 jobs:
   cold-setup:
