@@ -10,11 +10,14 @@ use crate::{
 };
 
 #[cfg(feature = "ocr")]
+use std::collections::BTreeSet;
+
+#[cfg(feature = "ocr")]
 use image_analysis_core::ImageView;
 #[cfg(feature = "ocr")]
 use image_analysis_ocr::{OcrBackend, OcrConfidence, OcrDocument, OcrRequest};
 #[cfg(feature = "ocr")]
-use video_analysis_core::ObservationKind;
+use video_analysis_core::{ObservationKind, Scene};
 
 /// Trait for vision model backend implementations.
 pub trait VisionModelBackend {
@@ -186,6 +189,101 @@ impl<B: OcrBackend> VideoAnalyzer for OcrVideoAnalyzer<B> {
     }
 }
 
+/// Returns the deterministic representative-frame plan for a scene list.
+///
+/// Each scene contributes its first, midpoint, and final frame. Duplicate frame
+/// indices are removed while preserving deterministic ascending order.
+#[cfg(feature = "ocr")]
+pub fn representative_scene_frames(scenes: &[Scene]) -> Result<BTreeSet<u64>> {
+    if scenes.is_empty() {
+        return Err(video_analysis_core::DetectError::InvalidArgument(
+            "scene-aware OCR requires at least one scene".to_string(),
+        ));
+    }
+
+    let mut frames = BTreeSet::new();
+    for scene in scenes {
+        let start = scene.start.frame_index;
+        let end = scene.end.frame_index;
+        if end < start {
+            return Err(video_analysis_core::DetectError::InvalidArgument(format!(
+                "scene end frame {end} precedes start frame {start}"
+            )));
+        }
+        frames.insert(start);
+        frames.insert(start + (end - start) / 2);
+        frames.insert(end);
+    }
+    Ok(frames)
+}
+
+/// OCR analyzer that delegates to `OcrVideoAnalyzer` only for representative
+/// frames from an existing canonical scene list.
+///
+/// The caller can run this analyzer through the ordinary `VideoAnalysisPipeline`.
+/// Non-representative frames are skipped without invoking the OCR backend, so a
+/// decoded source can still make one sequential pass while expensive recognition
+/// is bounded by the scene sampling plan.
+#[cfg(feature = "ocr")]
+pub struct SceneAwareOcrVideoAnalyzer<B> {
+    inner: OcrVideoAnalyzer<B>,
+    representative_frames: BTreeSet<u64>,
+}
+
+#[cfg(feature = "ocr")]
+impl<B> SceneAwareOcrVideoAnalyzer<B> {
+    /// Creates a scene-aware OCR analyzer from a canonical scene list.
+    pub fn new(name: impl Into<String>, backend: B, scenes: &[Scene]) -> Result<Self> {
+        Ok(Self {
+            inner: OcrVideoAnalyzer::new(name, backend),
+            representative_frames: representative_scene_frames(scenes)?,
+        })
+    }
+
+    /// Replaces the OCR request used for representative frames.
+    pub fn request(mut self, request: OcrRequest) -> Self {
+        self.inner = self.inner.request(request);
+        self
+    }
+
+    /// Returns the exact frame indices selected for OCR.
+    pub fn representative_frames(&self) -> &BTreeSet<u64> {
+        &self.representative_frames
+    }
+
+    /// Returns the OCR backend.
+    pub fn backend(&self) -> &B {
+        self.inner.backend()
+    }
+
+    /// Returns the OCR backend mutably.
+    pub fn backend_mut(&mut self) -> &mut B {
+        self.inner.backend_mut()
+    }
+
+    /// Consumes the analyzer and returns the OCR backend.
+    pub fn into_backend(self) -> B {
+        self.inner.into_backend()
+    }
+}
+
+#[cfg(feature = "ocr")]
+impl<B: OcrBackend> VideoAnalyzer for SceneAwareOcrVideoAnalyzer<B> {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+
+    fn process_frame(&mut self, frame: &VideoFrame<'_>) -> Result<Vec<Observation>> {
+        if !self
+            .representative_frames
+            .contains(&frame.position.frame_index)
+        {
+            return Ok(Vec::new());
+        }
+        self.inner.process_frame(frame)
+    }
+}
+
 /// Projects one OCR document into deterministic video text observations.
 ///
 /// Line-level output is preferred because it preserves useful layout geometry.
@@ -338,13 +436,17 @@ impl<B: TextModelBackend> TextAnalyzer for ModelTextAnalyzer<B> {
 
 #[cfg(all(test, feature = "ocr"))]
 mod tests {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
     use image_analysis_ocr::{OcrTextBlock, OcrTextLine};
     use num_rational::Rational64;
     use video_analysis_core::{
-        BoundingBox, FramePosition, ObservationKind, VideoAnalysisPipeline, VideoFrame,
+        BoundingBox, FramePosition, ObservationKind, Scene, VideoAnalysisPipeline, VideoFrame,
     };
 
     use super::*;
+    use crate::{analyze_video_text_semantics, VideoTextSemanticContext};
 
     struct FixtureOcr;
 
@@ -362,6 +464,32 @@ mod tests {
             Ok(OcrDocument::new("Five Ways", image.width, image.height)?
                 .language("en")
                 .block(block))
+        }
+    }
+
+    struct CountingOcr {
+        calls: Rc<Cell<usize>>,
+    }
+
+    impl OcrBackend for CountingOcr {
+        fn recognize_image(
+            &mut self,
+            image: &ImageView<'_>,
+            _request: &OcrRequest,
+        ) -> Result<OcrDocument> {
+            self.calls.set(self.calls.get() + 1);
+            OcrDocument::new("Scene Text", image.width, image.height)
+        }
+    }
+
+    fn position(frame_index: u64) -> FramePosition {
+        FramePosition::from_frame_index(frame_index, Rational64::new(30, 1))
+    }
+
+    fn scene(start: u64, end: u64) -> Scene {
+        Scene {
+            start: position(start),
+            end: position(end),
         }
     }
 
@@ -408,5 +536,57 @@ mod tests {
             Some("document")
         );
         Ok(())
+    }
+
+    #[test]
+    fn scene_aware_ocr_samples_edges_and_midpoints_then_tracks_per_scene() -> Result<()> {
+        let scenes = vec![scene(0, 4), scene(5, 8)];
+        assert_eq!(
+            representative_scene_frames(&scenes)?
+                .into_iter()
+                .collect::<Vec<_>>(),
+            vec![0, 2, 4, 5, 6, 8]
+        );
+
+        let calls = Rc::new(Cell::new(0));
+        let analyzer = SceneAwareOcrVideoAnalyzer::new(
+            "ocr",
+            CountingOcr {
+                calls: calls.clone(),
+            },
+            &scenes,
+        )?;
+        let mut pipeline = VideoAnalysisPipeline::builder().analyzer(analyzer).build()?;
+        let pixels = vec![0_u8; 2 * 2 * 3];
+        for frame_index in 0..=8 {
+            let frame = VideoFrame::rgb24(position(frame_index), 2, 2, &pixels)?;
+            pipeline.process_frame_ref(&frame)?;
+        }
+        let analysis = pipeline.finish_analysis()?;
+        assert_eq!(calls.get(), 6);
+        assert_eq!(analysis.observations.len(), 6);
+
+        let semantics = analyze_video_text_semantics(
+            VideoTextSemanticContext {
+                video_id: "video-1",
+                width: 2,
+                height: 2,
+                duration_seconds: Some(8.0 / 30.0),
+                scenes: &scenes,
+            },
+            &analysis.observations,
+        )?;
+        assert_eq!(semantics.tracks.len(), 2);
+        assert!(semantics
+            .tracks
+            .iter()
+            .all(|track| track.sample_count == 3 && track.scene_indices.len() == 1));
+        Ok(())
+    }
+
+    #[test]
+    fn scene_aware_ocr_rejects_missing_scene_plan() {
+        let error = SceneAwareOcrVideoAnalyzer::new("ocr", FixtureOcr, &[]).unwrap_err();
+        assert!(error.to_string().contains("at least one scene"));
     }
 }

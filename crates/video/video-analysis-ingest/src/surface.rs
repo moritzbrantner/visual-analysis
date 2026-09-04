@@ -1,5 +1,8 @@
 //! Library-owned runtime surface for `video-analysis-ingest`.
 
+#[cfg(feature = "ocr")]
+pub mod scene_ocr;
+
 use crate::{analyze_video_source, VideoFrameSource};
 use runtime_core::{
     structured_surface_value, OperationId, PackageSurface, RuntimeCapabilities, SurfaceOperation,
