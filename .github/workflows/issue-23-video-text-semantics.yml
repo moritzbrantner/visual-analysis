@@ -69,10 +69,34 @@ jobs:
           lib.write_text(text.replace(marker, replacement))
 
           semantic = Path('crates/video/video-analysis-recognition/src/video_text_semantics.rs')
-          semantic.write_text(semantic.read_text().replace(
-              'matches!(observation.kind, ObservationKind::Text)',
-              'matches!(&observation.kind, ObservationKind::Text)',
-          ))
+          text = semantic.read_text()
+          replacements = [
+              (
+                  'matches!(observation.kind, ObservationKind::Text)',
+                  'matches!(&observation.kind, ObservationKind::Text)',
+              ),
+              (
+                  'relations.sort_by(|left, right| relation_sort_key(left).cmp(&relation_sort_key(right)));',
+                  'relations.sort_by_key(relation_sort_key);',
+              ),
+              (
+                  'samples.sort_by(|left, right| sample_sort_key(left).cmp(&sample_sort_key(right)));',
+                  'samples.sort_by_key(sample_sort_key);',
+              ),
+              (
+                  'builder\n        .samples\n        .sort_by(|left, right| sample_sort_key(left).cmp(&sample_sort_key(right)));',
+                  'builder.samples.sort_by_key(sample_sort_key);',
+              ),
+              (
+                  '''fn sample_sort_key(\n    sample: &TextSample,\n) -> (\n    Option<u64>,\n    Option<i64>,\n    Option<u64>,\n    String,\n    Option<(u32, u32, u32, u32)>,\n    Option<String>,\n) {''',
+                  '''type SampleSortKey = (\n    Option<u64>,\n    Option<i64>,\n    Option<u64>,\n    String,\n    Option<(u32, u32, u32, u32)>,\n    Option<String>,\n);\n\nfn sample_sort_key(sample: &TextSample) -> SampleSortKey {''',
+              ),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one semantic cleanup occurrence: {old!r}')
+              text = text.replace(old, new)
+          semantic.write_text(text)
 
           predictions = Path('crates/video/video-analysis-recognition/src/model_predictions.rs')
           text = predictions.read_text()
