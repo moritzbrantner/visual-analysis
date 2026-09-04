@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
+env:
+  CODING_TOOLING_REV: 7f63dade760bfb1020c69d1a0ac7319cbbdf91ab
+
 jobs:
   structural:
     runs-on: ubuntu-latest
@@ -15,6 +21,46 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
       - run: git diff --check c5d6b02a708837cf01ee6e033faa41b0a667b38b..HEAD
       - run: python3 scripts/check_visual_extraction.py --check
-      - run: cargo metadata --format-version 1 --no-deps > /dev/null
+
+      - name: Prepare pinned source workspaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init ../coding-tooling
+          git -C ../coding-tooling fetch --depth=1 https://github.com/moritzbrantner/coding-tooling.git "$CODING_TOOLING_REV"
+          git -C ../coding-tooling checkout --detach FETCH_HEAD
+          (cd ../coding-tooling && bun install --frozen-lockfile)
+
+          FOUNDATION_REV="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('.coding-tooling.source-deps.json').read_text())
+          revisions = {
+              patch['rev']
+              for patch in manifest['cargo']['patches']
+              if patch['git'] == 'https://github.com/moritzbrantner/moenarch-foundation'
+          }
+          if len(revisions) != 1:
+              raise SystemExit(f'expected one Foundation revision, found {sorted(revisions)}')
+          print(revisions.pop())
+          PY
+          )"
+          git init ../moenarch-foundation
+          git -C ../moenarch-foundation fetch --depth=1 https://github.com/moritzbrantner/moenarch-foundation.git "$FOUNDATION_REV"
+          git -C ../moenarch-foundation checkout --detach FETCH_HEAD
+
+      - name: Activate pinned source dependencies
+        run: bash scripts/source-deps activate
+
+      - name: Verify locked workspace metadata
+        run: cargo metadata --locked --format-version 1 --no-deps > /dev/null
+
+      - name: Deactivate pinned source dependencies
+        if: always()
+        run: bash scripts/source-deps deactivate || true

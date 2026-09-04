@@ -4,6 +4,7 @@ mod external_command;
 mod model_analyzers;
 mod model_predictions;
 pub mod surface;
+mod video_text_semantics;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use video_analysis_core::{
@@ -15,6 +16,7 @@ use vision_core::{IdentityMatch, VisualDetectionKind, VisualEmbedding, VisualReg
 pub use external_command::*;
 pub use model_analyzers::*;
 pub use model_predictions::*;
+pub use video_text_semantics::*;
 
 #[cfg(feature = "onnx")]
 #[derive(Debug)]

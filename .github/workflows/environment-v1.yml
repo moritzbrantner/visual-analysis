@@ -29,6 +29,9 @@ on:
 permissions:
   contents: read
 
+env:
+  CODING_TOOLING_REV: 0c4cf3d19ec62c03002fd123bc7c2d0dcdd02628
+
 jobs:
   cold-setup:
     runs-on: ubuntu-latest
@@ -47,7 +50,7 @@ jobs:
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           repository: moritzbrantner/coding-tooling
-          ref: 0c4cf3d19ec62c03002fd123bc7c2d0dcdd02628
+          ref: ${{ env.CODING_TOOLING_REV }}
           path: .ci/coding-tooling
           persist-credentials: false
 
@@ -56,7 +59,30 @@ jobs:
           cd .ci/coding-tooling
           bun install --frozen-lockfile
 
-      - name: Capture expected environment fingerprint
+      - name: Prepare pinned Foundation workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          FOUNDATION_REV="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('.coding-tooling.source-deps.json').read_text())
+          revisions = {
+              patch['rev']
+              for patch in manifest['cargo']['patches']
+              if patch['git'] == 'https://github.com/moritzbrantner/moenarch-foundation'
+          }
+          if len(revisions) != 1:
+              raise SystemExit(f'expected one Foundation revision, found {sorted(revisions)}')
+          print(revisions.pop())
+          PY
+          )"
+          git init ../moenarch-foundation
+          git -C ../moenarch-foundation fetch --depth=1 https://github.com/moritzbrantner/moenarch-foundation.git "$FOUNDATION_REV"
+          git -C ../moenarch-foundation checkout --detach FETCH_HEAD
+
+      - name: Capture expected registry-mode environment fingerprint
         shell: bash
         run: |
           set -euo pipefail
@@ -72,6 +98,11 @@ jobs:
           test -n "$expected"
           printf 'EXPECTED_ENVIRONMENT_FINGERPRINT=%s\n' "$expected" >> "$GITHUB_ENV"
 
+      - name: Activate pinned source dependencies for setup
+        env:
+          CODING_TOOLING_DIR: ${{ github.workspace }}/.ci/coding-tooling
+        run: bash scripts/source-deps activate
+
       - name: Prepare declared environment
         run: bash scripts/codex-environment.sh setup
 
@@ -85,6 +116,11 @@ jobs:
             Cargo.lock \
             .repository-environment.toml \
             .coding-tooling.source-deps.json
+
+      - name: Return to registry mode before fingerprint verification
+        env:
+          CODING_TOOLING_DIR: ${{ github.workspace }}/.ci/coding-tooling
+        run: bash scripts/source-deps deactivate
 
       - name: Verify prepared environment fingerprint
         shell: bash
@@ -114,11 +150,22 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Remove verifier checkout
-        if: always()
-        run: rm -rf .ci
+      - name: Activate pinned source dependencies for structural Cargo checks
+        env:
+          CODING_TOOLING_DIR: ${{ github.workspace }}/.ci/coding-tooling
+        run: bash scripts/source-deps activate
 
       - name: Verify structural baseline
         run: |
           python3 scripts/check_visual_extraction.py --check
           cargo metadata --locked --format-version 1 --no-deps > /dev/null
+
+      - name: Deactivate pinned source dependencies
+        if: always()
+        env:
+          CODING_TOOLING_DIR: ${{ github.workspace }}/.ci/coding-tooling
+        run: bash scripts/source-deps deactivate || true
+
+      - name: Remove verifier checkout
+        if: always()
+        run: rm -rf .ci

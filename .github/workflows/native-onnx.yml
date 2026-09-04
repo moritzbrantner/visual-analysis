@@ -14,6 +14,7 @@ on:
       - "crates/image/image-analysis-embeddings-server/**"
       - "tests/fixtures/ocr/**"
       - "scripts/setup_visual_acceptance_fixtures.sh"
+      - ".coding-tooling.source-deps.json"
       - ".github/workflows/native-onnx.yml"
       - "Cargo.toml"
       - "Cargo.lock"
@@ -31,12 +32,16 @@ on:
       - "crates/image/image-analysis-embeddings-server/**"
       - "tests/fixtures/ocr/**"
       - "scripts/setup_visual_acceptance_fixtures.sh"
+      - ".coding-tooling.source-deps.json"
       - ".github/workflows/native-onnx.yml"
       - "Cargo.toml"
       - "Cargo.lock"
 
 permissions:
   contents: read
+
+env:
+  CODING_TOOLING_REV: 7f63dade760bfb1020c69d1a0ac7319cbbdf91ab
 
 jobs:
   native-onnx:
@@ -50,6 +55,41 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+
+      - name: Prepare pinned source workspaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init ../coding-tooling
+          git -C ../coding-tooling fetch --depth=1 https://github.com/moritzbrantner/coding-tooling.git "$CODING_TOOLING_REV"
+          git -C ../coding-tooling checkout --detach FETCH_HEAD
+          (cd ../coding-tooling && bun install --frozen-lockfile)
+
+          FOUNDATION_REV="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('.coding-tooling.source-deps.json').read_text())
+          revisions = {
+              patch['rev']
+              for patch in manifest['cargo']['patches']
+              if patch['git'] == 'https://github.com/moritzbrantner/moenarch-foundation'
+          }
+          if len(revisions) != 1:
+              raise SystemExit(f'expected one Foundation revision, found {sorted(revisions)}')
+          print(revisions.pop())
+          PY
+          )"
+          git init ../moenarch-foundation
+          git -C ../moenarch-foundation fetch --depth=1 https://github.com/moritzbrantner/moenarch-foundation.git "$FOUNDATION_REV"
+          git -C ../moenarch-foundation checkout --detach FETCH_HEAD
+
+      - name: Activate pinned source dependencies
+        run: bash scripts/source-deps activate
 
       - uses: actions/cache@v4
         with:
@@ -85,22 +125,26 @@ jobs:
 
       - name: Verify face runtime surface units
         run: |
-          cargo test -p moenarch-image-analysis-detection --features onnx --lib
-          cargo test -p moenarch-image-analysis-embeddings --features onnx --lib
+          cargo test --locked -p moenarch-image-analysis-detection --features onnx --lib
+          cargo test --locked -p moenarch-image-analysis-embeddings --features onnx --lib
 
       - name: Prepare semantic image fixtures
         run: bash scripts/setup_visual_acceptance_fixtures.sh
 
       - name: Verify OCR through standard surface
         run: >-
-          cargo test -p moenarch-image-analysis-ocr
+          cargo test --locked -p moenarch-image-analysis-ocr
           --features external-tests
           --test external_onnx_smoke
           -- --ignored --nocapture
 
       - name: Verify object detection through standard surface
         run: >-
-          cargo test -p moenarch-image-analysis-detection
+          cargo test --locked -p moenarch-image-analysis-detection
           --features external-tests
           --test external_onnx_smoke
           -- --ignored --nocapture
+
+      - name: Deactivate pinned source dependencies
+        if: always()
+        run: bash scripts/source-deps deactivate || true
