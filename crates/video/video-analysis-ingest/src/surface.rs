@@ -1,9 +1,11 @@
 //! Library-owned runtime surface for `video-analysis-ingest`.
 
+use crate::{analyze_video_source, VideoFrameSource};
 use runtime_core::{
     structured_surface_value, OperationId, PackageSurface, RuntimeCapabilities, SurfaceOperation,
     SurfaceRequest, SurfaceResponse,
 };
+use video_analysis_core::{ContentDetector, DetectError, DetectionResult, ScenePipeline};
 
 /// Returns the package surface exposed by every transport wrapper.
 pub fn package_surface() -> PackageSurface {
@@ -49,6 +51,37 @@ pub fn package_surface() -> PackageSurface {
             ),
         ],
     }
+}
+
+/// Runs the canonical content-scene compatibility detector over a decoded video source.
+///
+/// Consumers own source selection and persistence. Scene algorithm ownership remains in
+/// `scenedetect-core`; this function only composes the existing visual-analysis ingest
+/// and compatibility surfaces so applications do not need to reconstruct the pipeline.
+pub fn detect_content_scenes<S>(
+    source: &mut S,
+    threshold: f32,
+    min_scene_len: u64,
+) -> video_analysis_core::Result<DetectionResult>
+where
+    S: VideoFrameSource,
+{
+    if !threshold.is_finite() || threshold < 0.0 {
+        return Err(DetectError::InvalidArgument(
+            "content scene threshold must be finite and non-negative".to_string(),
+        ));
+    }
+    if min_scene_len == 0 {
+        return Err(DetectError::InvalidArgument(
+            "minimum scene length must be greater than zero".to_string(),
+        ));
+    }
+
+    let mut pipeline = ScenePipeline::builder()
+        .detector(ContentDetector::new(threshold, min_scene_len))
+        .start_in_scene(true)
+        .build()?;
+    analyze_video_source(source, &mut pipeline, |_| Ok(()))
 }
 
 fn operation(
