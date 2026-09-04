@@ -208,7 +208,7 @@ pub fn analyze_video_text_semantics(
         });
     }
 
-    relations.sort_by(|left, right| relation_sort_key(left).cmp(&relation_sort_key(right)));
+    relations.sort_by_key(relation_sort_key);
     Ok(VideoTextSemanticAnalysis {
         tracks,
         annotations,
@@ -221,9 +221,7 @@ pub fn video_text_role_concept(role: VideoTextRole) -> Result<ConceptId> {
     concept(match role {
         VideoTextRole::Subtitle => "visual-analysis:video-text-role:subtitle",
         VideoTextRole::EndCredit => "visual-analysis:video-text-role:end-credit",
-        VideoTextRole::PresentationSlide => {
-            "visual-analysis:video-text-role:presentation-slide"
-        }
+        VideoTextRole::PresentationSlide => "visual-analysis:video-text-role:presentation-slide",
         VideoTextRole::SceneText => "visual-analysis:video-text-role:scene-text",
     })
 }
@@ -270,25 +268,25 @@ fn collect_text_samples(
         })
         .collect::<Vec<_>>();
 
-    samples.sort_by(|left, right| sample_sort_key(left).cmp(&sample_sort_key(right)));
+    samples.sort_by_key(sample_sort_key);
     samples
 }
 
 fn is_visual_text_observation(observation: &Observation) -> bool {
-    matches!(observation.kind, ObservationKind::Text)
+    matches!(&observation.kind, ObservationKind::Text)
         || observation.analyzer.to_ascii_lowercase().contains("ocr")
 }
 
-fn sample_sort_key(
-    sample: &TextSample,
-) -> (
+type SampleSortKey = (
     Option<u64>,
     Option<i64>,
     Option<u64>,
     String,
     Option<(u32, u32, u32, u32)>,
     Option<String>,
-) {
+);
+
+fn sample_sort_key(sample: &TextSample) -> SampleSortKey {
     (
         sample.frame,
         sample.seconds.map(seconds_sort_key),
@@ -380,8 +378,7 @@ fn within_temporal_gap(left: &TextSample, right: &TextSample) -> bool {
             && right_seconds - left_seconds <= MAX_FALLBACK_GAP_SECONDS;
     }
     if let (Some(left_frame), Some(right_frame)) = (left.frame, right.frame) {
-        return right_frame >= left_frame
-            && right_frame - left_frame <= MAX_FALLBACK_GAP_FRAMES;
+        return right_frame >= left_frame && right_frame - left_frame <= MAX_FALLBACK_GAP_FRAMES;
     }
     true
 }
@@ -412,12 +409,18 @@ fn summarize_track(
     context: VideoTextSemanticContext<'_>,
     mut builder: TrackBuilder,
 ) -> Result<TrackSummary> {
-    builder
-        .samples
-        .sort_by(|left, right| sample_sort_key(left).cmp(&sample_sort_key(right)));
+    builder.samples.sort_by_key(sample_sort_key);
     let text = consensus_text(&builder.samples);
-    let start_frame = builder.samples.iter().filter_map(|sample| sample.frame).min();
-    let end_frame = builder.samples.iter().filter_map(|sample| sample.frame).max();
+    let start_frame = builder
+        .samples
+        .iter()
+        .filter_map(|sample| sample.frame)
+        .min();
+    let end_frame = builder
+        .samples
+        .iter()
+        .filter_map(|sample| sample.frame)
+        .max();
     let start_seconds = builder
         .samples
         .iter()
@@ -442,8 +445,8 @@ fn summarize_track(
         .filter_map(|sample| sample.score)
         .map(f64::from)
         .collect::<Vec<_>>();
-    let average_ocr_score = (!scores.is_empty())
-        .then(|| scores.iter().sum::<f64>() / scores.len() as f64);
+    let average_ocr_score =
+        (!scores.is_empty()).then(|| scores.iter().sum::<f64>() / scores.len() as f64);
     let first = builder.samples.first().ok_or_else(|| {
         DetectError::InvalidArgument("video text track cannot be empty".to_string())
     })?;
@@ -470,7 +473,12 @@ fn summarize_track(
             .unwrap_or_else(|| "none".to_string());
         let region_signature = first
             .region
-            .map(|region| format!("{}:{}:{}:{}", region.x, region.y, region.width, region.height))
+            .map(|region| {
+                format!(
+                    "{}:{}:{}:{}",
+                    region.x, region.y, region.width, region.height
+                )
+            })
             .unwrap_or_else(|| "none".to_string());
         EntityId::derive(&[
             "visual-analysis",
@@ -513,11 +521,13 @@ fn consensus_text(samples: &[TextSample]) -> String {
     }
     counts
         .into_iter()
-        .max_by(|(left_key, (left_count, _)), (right_key, (right_count, _))| {
-            left_count
-                .cmp(right_count)
-                .then_with(|| right_key.cmp(left_key))
-        })
+        .max_by(
+            |(left_key, (left_count, _)), (right_key, (right_count, _))| {
+                left_count
+                    .cmp(right_count)
+                    .then_with(|| right_key.cmp(left_key))
+            },
+        )
         .map(|(_, (_, text))| text)
         .unwrap_or_default()
 }
@@ -532,8 +542,16 @@ fn mean_region(samples: &[TextSample]) -> Option<BoundingBox> {
     }
     let count = regions.len() as u64;
     Some(BoundingBox {
-        x: (regions.iter().map(|region| u64::from(region.x)).sum::<u64>() / count) as u32,
-        y: (regions.iter().map(|region| u64::from(region.y)).sum::<u64>() / count) as u32,
+        x: (regions
+            .iter()
+            .map(|region| u64::from(region.x))
+            .sum::<u64>()
+            / count) as u32,
+        y: (regions
+            .iter()
+            .map(|region| u64::from(region.y))
+            .sum::<u64>()
+            / count) as u32,
         width: (regions
             .iter()
             .map(|region| u64::from(region.width))
@@ -738,9 +756,7 @@ fn semantic_evidence(
     )?);
     evidence.push(integer_evidence(
         "visual-analysis:video-text-evidence:scene-stable-track-count",
-        strongest_stats
-            .stable_track_count
-            .min(i64::MAX as usize) as i64,
+        strongest_stats.stable_track_count.min(i64::MAX as usize) as i64,
     )?);
 
     if let Some(track_id) = &summary.upstream_track_id {
@@ -756,9 +772,7 @@ fn semantic_evidence(
 fn infer_scene_index(scenes: &[Scene], frame: u64) -> Option<u64> {
     scenes
         .iter()
-        .position(|scene| {
-            frame >= scene.start.frame_index && frame <= scene.end.frame_index
-        })
+        .position(|scene| frame >= scene.start.frame_index && frame <= scene.end.frame_index)
         .map(|index| index as u64)
 }
 
@@ -879,7 +893,9 @@ fn bounding_box_iou(left: BoundingBox, right: BoundingBox) -> f64 {
     }
     let left_area = u64::from(left.width).saturating_mul(u64::from(left.height));
     let right_area = u64::from(right.width).saturating_mul(u64::from(right.height));
-    let union = left_area.saturating_add(right_area).saturating_sub(intersection);
+    let union = left_area
+        .saturating_add(right_area)
+        .saturating_sub(intersection);
     if union == 0 {
         0.0
     } else {
@@ -1046,7 +1062,8 @@ mod tests {
                 BoundingBox::new(600, 250 + index as u32 * 120, 700, 70).unwrap(),
             ));
         }
-        let analysis = analyze_video_text_semantics(context(&scenes, 100.0), &observations).unwrap();
+        let analysis =
+            analyze_video_text_semantics(context(&scenes, 100.0), &observations).unwrap();
 
         assert_eq!(analysis.tracks.len(), 4);
         assert!(analysis

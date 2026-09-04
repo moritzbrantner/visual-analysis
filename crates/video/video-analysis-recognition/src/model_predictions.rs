@@ -1,8 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use video_analysis_core::{AnalysisEvent, BoundingBox, Observation, ObservationKind, Result};
-use video_analysis_posture::{Keypoint, Keypoint3d, Pose3dEstimate, PoseEstimate};
+use video_analysis_core::{AnalysisEvent, BoundingBox, Observation, ObservationKind};
 
 use model_runtime::ModelTask;
 
@@ -50,18 +49,6 @@ impl RawKeypoint2d {
             visible: None,
         }
     }
-
-    /// Converts this value to keypoint.
-    pub fn to_keypoint(&self) -> Result<Keypoint> {
-        let mut keypoint = Keypoint::new(self.name.clone(), self.x, self.y)?;
-        if let Some(score) = self.score {
-            keypoint = keypoint.score(score)?;
-        }
-        if let Some(visible) = self.visible {
-            keypoint = keypoint.visible(visible);
-        }
-        Ok(keypoint)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -93,21 +80,6 @@ impl RawKeypoint3d {
             visible: None,
         }
     }
-
-    /// Converts this value to keypoint.
-    pub fn to_keypoint(&self) -> Result<Keypoint3d> {
-        let mut keypoint = Keypoint3d::new(
-            self.name.clone(),
-            three_d_processing_core::Point3::new(self.x, self.y, self.z),
-        )?;
-        if let Some(score) = self.score {
-            keypoint = keypoint.score(score)?;
-        }
-        if let Some(visible) = self.visible {
-            keypoint = keypoint.visible(visible);
-        }
-        Ok(keypoint)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
@@ -129,27 +101,6 @@ pub struct RawPose2dPrediction {
     pub attributes: BTreeMap<String, String>,
 }
 
-impl RawPose2dPrediction {
-    /// Converts this value to pose estimate.
-    pub fn to_pose_estimate(&self, frame_size: Option<(u32, u32)>) -> Result<PoseEstimate> {
-        let keypoints = self
-            .keypoints
-            .iter()
-            .map(RawKeypoint2d::to_keypoint)
-            .collect::<Result<Vec<_>>>()?;
-        let mut pose = PoseEstimate::new(keypoints)?;
-        pose.id = self.id.clone();
-        pose.label = self.label.clone();
-        pose.score = self.score;
-        pose.region = self
-            .region
-            .and_then(|region| region.to_bounding_box(frame_size, true));
-        pose.attributes = self.attributes.clone();
-        pose.validate()?;
-        Ok(pose)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 /// Data type for raw pose3d prediction.
 pub struct RawPose3dPrediction {
@@ -165,24 +116,6 @@ pub struct RawPose3dPrediction {
     #[serde(default)]
     /// The attributes value.
     pub attributes: BTreeMap<String, String>,
-}
-
-impl RawPose3dPrediction {
-    /// Converts this value to pose 3d estimate.
-    pub fn to_pose_3d_estimate(&self) -> Result<Pose3dEstimate> {
-        let keypoints = self
-            .keypoints
-            .iter()
-            .map(RawKeypoint3d::to_keypoint)
-            .collect::<Result<Vec<_>>>()?;
-        let mut pose = Pose3dEstimate::new(keypoints)?;
-        pose.id = self.id.clone();
-        pose.label = self.label.clone();
-        pose.score = self.score;
-        pose.attributes = self.attributes.clone();
-        pose.validate()?;
-        Ok(pose)
-    }
 }
 
 impl RawPrediction {
