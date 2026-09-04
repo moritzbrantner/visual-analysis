@@ -82,12 +82,7 @@ jobs:
           git -C ../moenarch-foundation fetch --depth=1 https://github.com/moritzbrantner/moenarch-foundation.git "$FOUNDATION_REV"
           git -C ../moenarch-foundation checkout --detach FETCH_HEAD
 
-      - name: Activate pinned source dependencies
-        env:
-          CODING_TOOLING_DIR: ${{ github.workspace }}/.ci/coding-tooling
-        run: bash scripts/source-deps activate
-
-      - name: Capture expected environment fingerprint
+      - name: Capture expected registry-mode environment fingerprint
         shell: bash
         run: |
           set -euo pipefail
@@ -103,6 +98,11 @@ jobs:
           test -n "$expected"
           printf 'EXPECTED_ENVIRONMENT_FINGERPRINT=%s\n' "$expected" >> "$GITHUB_ENV"
 
+      - name: Activate pinned source dependencies for setup
+        env:
+          CODING_TOOLING_DIR: ${{ github.workspace }}/.ci/coding-tooling
+        run: bash scripts/source-deps activate
+
       - name: Prepare declared environment
         run: bash scripts/codex-environment.sh setup
 
@@ -116,6 +116,11 @@ jobs:
             Cargo.lock \
             .repository-environment.toml \
             .coding-tooling.source-deps.json
+
+      - name: Return to registry mode before fingerprint verification
+        env:
+          CODING_TOOLING_DIR: ${{ github.workspace }}/.ci/coding-tooling
+        run: bash scripts/source-deps deactivate
 
       - name: Verify prepared environment fingerprint
         shell: bash
@@ -144,6 +149,11 @@ jobs:
           path: .artifacts/environment/*.json
           if-no-files-found: error
           retention-days: 7
+
+      - name: Activate pinned source dependencies for structural Cargo checks
+        env:
+          CODING_TOOLING_DIR: ${{ github.workspace }}/.ci/coding-tooling
+        run: bash scripts/source-deps activate
 
       - name: Verify structural baseline
         run: |
