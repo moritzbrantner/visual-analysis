@@ -28,8 +28,6 @@ const html = await readFile(join(root, "index.html"), "utf8");
 for (const requiredText of [
   "Visual Inspector",
   "Private by default".replace("Private", "Local"),
-  "image.core.lumaHistogram",
-  "image.processing.hash",
   "script type=\"module\" src=\"./app.js\"",
 ]) {
   if (!html.includes(requiredText)) throw new Error(`index.html missing: ${requiredText}`);
@@ -39,6 +37,10 @@ const app = await readFile(join(root, "app.js"), "utf8");
 for (const requiredText of [
   "./wasm/image-analysis-core/index.js",
   "./wasm/image-analysis-processing/index.js",
+  "image.core.summary",
+  "image.core.lumaHistogram",
+  "image.core.maskTensorSummary",
+  "image.processing.hash",
   "VIDEO_SAMPLE_COUNT",
 ]) {
   if (!app.includes(requiredText)) throw new Error(`app.js missing: ${requiredText}`);
