@@ -76,3 +76,5 @@ video-analysis-synthesis = { package = "moenarch-video-analysis-synthesis", vers
 video-analysis-tracking = { package = "moenarch-video-analysis-tracking", version = "=0.1.0", path = "crates/video/video-analysis-tracking" }
 video-analysis-transform = { package = "moenarch-video-analysis-transform", version = "=0.1.0", path = "crates/video/video-analysis-transform" }
 vision-core = { package = "moenarch-vision-core", version = "=0.1.0", path = "crates/vision/vision-core" }
+
+# Temporary environment-v1 lock-drift probe; remove after capturing generated Cargo.lock delta.
