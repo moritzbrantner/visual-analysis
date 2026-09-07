@@ -147,6 +147,37 @@ export function scalePixelBoxToSamInput(region, originalSize, reshapedSize) {
   ];
 }
 
+export function buildSamPointPrompt(points, reshapedSize) {
+  const reshapedHeight = Number(reshapedSize?.[0]);
+  const reshapedWidth = Number(reshapedSize?.[1]);
+  if (![reshapedHeight, reshapedWidth].every((value) => Number.isFinite(value) && value > 0)) {
+    throw new Error("SAM reshaped image dimensions must be positive finite values.");
+  }
+
+  const promptPoints = Array.isArray(points) ? points : [];
+  if (promptPoints.length === 0) {
+    throw new Error("SAM point prompting requires at least one point.");
+  }
+
+  const coordinates = [];
+  const labels = [];
+  const normalizedPoints = promptPoints.map((point) => {
+    const x = clamp01(point?.x);
+    const y = clamp01(point?.y);
+    const label = point?.label === 0 ? 0 : 1;
+    coordinates.push(x * reshapedWidth, y * reshapedHeight);
+    labels.push(label);
+    return { x, y, label };
+  });
+
+  return {
+    coordinates,
+    labels,
+    normalizedPoints,
+    pointCount: normalizedPoints.length,
+  };
+}
+
 async function decodeBestSamMask(session, modelInputs, prompt) {
   const { pred_masks: predMasks, iou_scores: iouScores } = await session.model({
     ...session.embeddings,
@@ -185,25 +216,35 @@ async function decodeBestSamMask(session, modelInputs, prompt) {
   };
 }
 
-export async function segmentSamPoint(session, point) {
+export async function segmentSamPoints(session, points) {
   requireSamSession(session);
 
-  const normalizedX = clamp01(point?.x);
-  const normalizedY = clamp01(point?.y);
-  const label = point?.label === 0 ? 0 : 1;
   const reshaped = session.processed.reshaped_input_sizes[0];
+  const prompt = buildSamPointPrompt(points, reshaped);
   const inputPoints = new session.Tensor(
     "float32",
-    [normalizedX * reshaped[1], normalizedY * reshaped[0]],
-    [1, 1, 1, 2],
+    prompt.coordinates,
+    [1, 1, prompt.pointCount, 2],
   );
-  const inputLabels = new session.Tensor("int64", [BigInt(label)], [1, 1, 1]);
+  const inputLabels = new session.Tensor(
+    "int64",
+    prompt.labels.map((label) => BigInt(label)),
+    [1, 1, prompt.pointCount],
+  );
 
   return decodeBestSamMask(
     session,
     { input_points: inputPoints, input_labels: inputLabels },
-    { type: "point", x: normalizedX, y: normalizedY, label },
+    { type: "points", points: prompt.normalizedPoints },
   );
+}
+
+export async function segmentSamPoint(session, point) {
+  const segment = await segmentSamPoints(session, [point]);
+  return {
+    ...segment,
+    prompt: { type: "point", ...segment.prompt.points[0] },
+  };
 }
 
 export async function segmentSamBox(session, region) {
