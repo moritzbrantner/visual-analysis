@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "base_extraction_sha": "b8b29cf8db0b86ed1b133a18155adf24992f9483",
-  "reason": "Post-bootstrap feature work promoting existing OCR, detection, face, embedding, and video recognition capabilities to executable standard surfaces and evidence-backed semantic analysis while preserving source ownership boundaries.",
+  "reason": "Post-bootstrap feature work promoting existing OCR, detection, segmentation, face, embedding, and video recognition capabilities to executable standard surfaces, explicit model contracts, and evidence-backed semantic analysis while preserving source ownership boundaries.",
   "paths": [
     "crates/image/image-analysis-detection-cli/Cargo.toml",
     "crates/image/image-analysis-detection-server/Cargo.toml",
@@ -20,6 +20,7 @@
     "crates/image/image-analysis-ocr/src/lib.rs",
     "crates/image/image-analysis-ocr/src/surface.rs",
     "crates/image/image-analysis-ocr/tests/external_onnx_smoke.rs",
+    "crates/image/image-analysis-segmentation/src/surface.rs",
     "crates/video/video-analysis-ingest/src/surface.rs",
     "crates/video/video-analysis-recognition/src/lib.rs",
     "crates/video/video-analysis-recognition/src/model_analyzers.rs",
