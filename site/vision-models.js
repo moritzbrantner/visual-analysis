@@ -127,10 +127,14 @@ export function scalePixelBoxToSamInput(region, originalSize, reshapedSize) {
     throw new Error("SAM image dimensions must be positive finite values.");
   }
 
-  const x1 = clamp(region?.x, 0, originalWidth);
-  const y1 = clamp(region?.y, 0, originalHeight);
-  const x2 = clamp(x1 + Math.max(0, Number(region?.width) || 0), x1, originalWidth);
-  const y2 = clamp(y1 + Math.max(0, Number(region?.height) || 0), y1, originalHeight);
+  const rawX = Number(region?.x) || 0;
+  const rawY = Number(region?.y) || 0;
+  const rawWidth = Math.max(0, Number(region?.width) || 0);
+  const rawHeight = Math.max(0, Number(region?.height) || 0);
+  const x1 = clamp(rawX, 0, originalWidth);
+  const y1 = clamp(rawY, 0, originalHeight);
+  const x2 = clamp(rawX + rawWidth, 0, originalWidth);
+  const y2 = clamp(rawY + rawHeight, 0, originalHeight);
   if (x2 <= x1 || y2 <= y1) {
     throw new Error("SAM box prompts must have a non-zero region inside the image.");
   }
