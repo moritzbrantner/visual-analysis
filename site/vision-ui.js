@@ -4,8 +4,11 @@ import {
   browserVisionCapabilities,
   detectOpenVocabulary,
   prepareSamImage,
+  segmentSamBox,
   segmentSamPoint,
 } from "./vision-models.js";
+
+const MAX_SAM_REFINEMENTS = 5;
 
 function ensureVisionUi() {
   if (!document.querySelector('link[href="./vision.css"]')) {
@@ -50,6 +53,7 @@ function ensureVisionUi() {
           <input id="vision-concepts" value="person, car, dog, cat" autocomplete="off" />
         </label>
         <button id="detect-concepts" class="button button-primary" type="button">Detect concepts</button>
+        <button id="refine-detections" class="button button-secondary" type="button" disabled>Refine masks</button>
         <button id="prepare-sam" class="button button-secondary" type="button">Prepare SAM</button>
         <button id="clear-vision-overlay" class="button button-secondary" type="button">Clear overlay</button>
       </div>
@@ -84,7 +88,7 @@ function ensureVisionUi() {
     const description = card.querySelector("p");
     if (description) {
       description.textContent =
-        "Native DETR/YuNet remain accepted model backends. The inspector can additionally run text-conditioned object detection and interactive SAM locally after explicit opt-in.";
+        "Native DETR/YuNet remain accepted model backends. The inspector can run text-conditioned detection, refine detector boxes with SAM, and use interactive SAM point prompts locally after explicit opt-in.";
     }
   }
 
@@ -97,6 +101,7 @@ const section = ui.section;
 const status = document.getElementById("learned-vision-status");
 const concepts = document.getElementById("vision-concepts");
 const detectButton = document.getElementById("detect-concepts");
+const refineButton = document.getElementById("refine-detections");
 const samButton = document.getElementById("prepare-sam");
 const clearButton = document.getElementById("clear-vision-overlay");
 const overlay = ui.overlay;
@@ -107,6 +112,7 @@ let imageUrl = "";
 let samSession = null;
 let samReady = false;
 let running = false;
+let lastDetections = [];
 
 function setStatus(message, kind = "") {
   status.textContent = message;
@@ -115,8 +121,10 @@ function setStatus(message, kind = "") {
 
 function setBusy(value) {
   running = value;
+  const webgpu = browserVisionCapabilities().webgpu;
   detectButton.disabled = value || !imageUrl;
-  samButton.disabled = value || !imageUrl || !browserVisionCapabilities().webgpu;
+  refineButton.disabled = value || !imageUrl || !webgpu || lastDetections.length === 0;
+  samButton.disabled = value || !imageUrl || !webgpu;
   clearButton.disabled = value || !imageUrl;
 }
 
@@ -150,6 +158,7 @@ function resetForImage() {
   imageUrl = nextUrl;
   samSession = null;
   samReady = false;
+  lastDetections = [];
   clearOverlay();
 
   section.hidden = !imageUrl;
@@ -162,7 +171,7 @@ function resetForImage() {
     setStatus(
       capabilities.webgpu
         ? "Ready. Model weights download only after you choose a learned-vision action."
-        : "Text-conditioned detection can use the browser CPU/WASM backend; interactive SAM requires WebGPU.",
+        : "Text-conditioned detection can use the browser CPU/WASM backend; SAM refinement requires WebGPU.",
     );
     configureOverlay(previewImage.naturalWidth || 1, previewImage.naturalHeight || 1);
   }
@@ -203,19 +212,31 @@ function drawDetections(detections) {
   }
 }
 
-function drawMask(segment) {
-  configureOverlay(segment.width, segment.height);
+function drawMasks(segments) {
+  if (segments.length === 0) return;
+  const { width, height } = segments[0];
+  configureOverlay(width, height);
   const context = overlay.getContext("2d");
-  const imageData = context.createImageData(segment.width, segment.height);
-  for (let index = 0; index < segment.data.length; index += 1) {
-    if (segment.data[index] === 0) continue;
-    const offset = index * 4;
-    imageData.data[offset] = 255;
-    imageData.data[offset + 1] = 255;
-    imageData.data[offset + 2] = 255;
-    imageData.data[offset + 3] = 112;
+  const imageData = context.createImageData(width, height);
+
+  for (const segment of segments) {
+    if (segment.width !== width || segment.height !== height) {
+      throw new Error("SAM masks for one image must share dimensions.");
+    }
+    for (let index = 0; index < segment.data.length; index += 1) {
+      if (segment.data[index] === 0) continue;
+      const offset = index * 4;
+      imageData.data[offset] = 255;
+      imageData.data[offset + 1] = 255;
+      imageData.data[offset + 2] = 255;
+      imageData.data[offset + 3] = Math.min(176, imageData.data[offset + 3] + 88);
+    }
   }
   context.putImageData(imageData, 0, 0);
+}
+
+function drawMask(segment) {
+  drawMasks([segment]);
 }
 
 function parseConcepts() {
@@ -223,6 +244,14 @@ function parseConcepts() {
     .split(",")
     .map((label) => label.trim())
     .filter(Boolean);
+}
+
+async function ensureSamSession() {
+  if (samSession) return samSession;
+  samSession = await prepareSamImage(imageUrl);
+  samReady = true;
+  overlay.classList.add("is-sam-ready");
+  return samSession;
 }
 
 async function runConceptDetection() {
@@ -235,6 +264,7 @@ async function runConceptDetection() {
       threshold: 0.08,
       topK: 20,
     });
+    lastDetections = detections;
     drawDetections(detections);
     if (detections.length === 0) {
       appendResult("No matches", "No requested concept cleared the confidence threshold.");
@@ -247,8 +277,60 @@ async function runConceptDetection() {
         );
       }
     }
+    const refinement = browserVisionCapabilities().webgpu && detections.length > 0
+      ? ` Refine masks will pass the top ${Math.min(MAX_SAM_REFINEMENTS, detections.length)} detector boxes to SAM.`
+      : "";
     setStatus(
-      `Open-vocabulary detection completed locally with ${detections.length} result${detections.length === 1 ? "" : "s"}.`,
+      `Open-vocabulary detection completed locally with ${detections.length} result${detections.length === 1 ? "" : "s"}.${refinement}`,
+      "success",
+    );
+  } catch (error) {
+    lastDetections = [];
+    setStatus(error instanceof Error ? error.message : String(error), "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function refineDetectionsWithSam() {
+  if (!imageUrl || running || lastDetections.length === 0) return;
+  setBusy(true);
+  clearResults();
+  const candidates = lastDetections
+    .filter((detection) => detection.region.width > 0 && detection.region.height > 0)
+    .slice(0, MAX_SAM_REFINEMENTS);
+  if (candidates.length === 0) {
+    setStatus("No non-empty detector boxes are available for SAM refinement.", "error");
+    setBusy(false);
+    return;
+  }
+
+  try {
+    if (!samSession) {
+      setStatus(`Loading ${SAM_MODEL_ID} and computing one reusable image embedding…`);
+      await ensureSamSession();
+    }
+
+    const refined = [];
+    for (let index = 0; index < candidates.length; index += 1) {
+      const detection = candidates[index];
+      setStatus(
+        `Refining detector box ${index + 1}/${candidates.length} (${detection.label}) with SAM…`,
+      );
+      const segment = await segmentSamBox(samSession, detection.region);
+      refined.push({ detection, segment });
+    }
+
+    drawMasks(refined.map(({ segment }) => segment));
+    clearResults();
+    for (const { detection, segment } of refined) {
+      appendResult(
+        detection.label,
+        `detector ${(detection.score * 100).toFixed(1)}% · SAM ${segment.score == null ? "unscored" : `${(segment.score * 100).toFixed(1)}%`} · ${segment.activePixels.toLocaleString()} mask pixels`,
+      );
+    }
+    setStatus(
+      `Refined ${refined.length} detector box${refined.length === 1 ? "" : "es"} into SAM masks using one cached image embedding.`,
       "success",
     );
   } catch (error) {
@@ -264,14 +346,12 @@ async function prepareSam() {
   clearResults();
   setStatus(`Loading ${SAM_MODEL_ID} and computing the image embedding locally…`);
   try {
-    samSession = await prepareSamImage(imageUrl);
-    samReady = true;
-    overlay.classList.add("is-sam-ready");
+    await ensureSamSession();
     setStatus(
       "SAM is ready. Left-click the image for a foreground point; right-click for a background point.",
       "success",
     );
-    appendResult("SAM ready", "The image embedding stays in browser memory; each point reuses it.");
+    appendResult("SAM ready", "The image embedding stays in browser memory; points and detector boxes reuse it.");
   } catch (error) {
     samSession = null;
     samReady = false;
@@ -319,10 +399,17 @@ capability.textContent = capabilities.webgpu
   : "No WebGPU · SAM disabled; open-vocabulary detection may fall back to browser WASM";
 
 detectButton.addEventListener("click", runConceptDetection);
+refineButton.addEventListener("click", refineDetectionsWithSam);
 samButton.addEventListener("click", prepareSam);
 clearButton.addEventListener("click", () => {
   clearOverlay();
-  setStatus(samReady ? "SAM is still ready; click the image to segment again." : "Overlay cleared.");
+  setStatus(
+    samReady
+      ? "Overlay cleared; SAM remains ready and cached for point or box prompts."
+      : lastDetections.length > 0
+        ? "Overlay cleared; detector results are still available for SAM refinement."
+        : "Overlay cleared.",
+  );
 });
 overlay.addEventListener("mousedown", segmentAtPointer);
 overlay.addEventListener("contextmenu", (event) => event.preventDefault());
