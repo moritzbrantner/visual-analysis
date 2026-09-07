@@ -4,6 +4,23 @@ const TRANSFORMERS_MODULE_URL =
 export const SAM_MODEL_ID = "Xenova/slimsam-77-uniform";
 export const OPEN_VOCAB_MODEL_ID = "Xenova/owlvit-base-patch32";
 
+export const BROWSER_VISION_MODELS = Object.freeze([
+  Object.freeze({
+    id: SAM_MODEL_ID,
+    task: "image-segmentation",
+    execution: "browser-webgpu",
+    optIn: true,
+    output: "binary-mask",
+  }),
+  Object.freeze({
+    id: OPEN_VOCAB_MODEL_ID,
+    task: "zero-shot-object-detection",
+    execution: "browser-webgpu-or-wasm",
+    optIn: true,
+    output: "canonical-detection-shape",
+  }),
+]);
+
 let transformersPromise;
 let samRuntimePromise;
 let openVocabularyDetectorPromise;
@@ -53,7 +70,7 @@ function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
 }
 
-function regionFromMask(data, width, height) {
+export function summarizeBinaryMask(data, width, height) {
   let minX = width;
   let minY = height;
   let maxX = -1;
@@ -124,7 +141,7 @@ export async function segmentSamPoint(session, point) {
   for (let index = 0; index < data.length; index += 1) {
     data[index] = mask.data[maskCount * index + bestIndex] === 1 ? 255 : 0;
   }
-  const summary = regionFromMask(data, mask.width, mask.height);
+  const summary = summarizeBinaryMask(data, mask.width, mask.height);
 
   return {
     backend: "transformers.js-sam-webgpu",
@@ -136,6 +153,28 @@ export async function segmentSamPoint(session, point) {
     activePixels: summary.activePixels,
     region: summary.region,
     prompt: { x: normalizedX, y: normalizedY, label },
+  };
+}
+
+export function normalizeOpenVocabularyDetection(detection) {
+  const xmin = Math.max(0, Math.round(detection?.box?.xmin ?? 0));
+  const ymin = Math.max(0, Math.round(detection?.box?.ymin ?? 0));
+  const xmax = Math.max(xmin, Math.round(detection?.box?.xmax ?? xmin));
+  const ymax = Math.max(ymin, Math.round(detection?.box?.ymax ?? ymin));
+  return {
+    label: String(detection?.label ?? "object"),
+    score: Number(detection?.score ?? 0),
+    region: {
+      x: xmin,
+      y: ymin,
+      width: xmax - xmin,
+      height: ymax - ymin,
+    },
+    attributes: {
+      backend: "transformers.js-zero-shot-object-detection",
+      modelId: OPEN_VOCAB_MODEL_ID,
+      promptKind: "text",
+    },
   };
 }
 
@@ -162,25 +201,5 @@ export async function detectOpenVocabulary(imageUrl, labels, options = {}) {
     top_k: topK,
   });
 
-  return detections.map((detection) => {
-    const xmin = Math.max(0, Math.round(detection.box?.xmin ?? 0));
-    const ymin = Math.max(0, Math.round(detection.box?.ymin ?? 0));
-    const xmax = Math.max(xmin, Math.round(detection.box?.xmax ?? xmin));
-    const ymax = Math.max(ymin, Math.round(detection.box?.ymax ?? ymin));
-    return {
-      label: String(detection.label ?? "object"),
-      score: Number(detection.score ?? 0),
-      region: {
-        x: xmin,
-        y: ymin,
-        width: xmax - xmin,
-        height: ymax - ymin,
-      },
-      attributes: {
-        backend: "transformers.js-zero-shot-object-detection",
-        modelId: OPEN_VOCAB_MODEL_ID,
-        promptKind: "text",
-      },
-    };
-  });
+  return detections.map(normalizeOpenVocabularyDetection);
 }
