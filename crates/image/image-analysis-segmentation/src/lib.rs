@@ -441,6 +441,14 @@ fn validate_backend_segment(
         )));
     }
 
+    let expected = segment.mask.width as usize * segment.mask.height as usize;
+    if segment.mask.data.len() != expected {
+        return Err(DetectError::InvalidFrameBuffer {
+            expected,
+            actual: segment.mask.data.len(),
+        });
+    }
+
     let bounds = segment.mask.bounding_box().ok_or_else(|| {
         DetectError::InvalidArgument(format!(
             "segmentation backend mask {index} contains no active pixels"
@@ -596,6 +604,41 @@ mod tests {
         let error =
             segment_image_with_backend(&mut backend, &image.as_view(), &request).unwrap_err();
         assert!(error.to_string().contains("expected 4x4"));
+    }
+
+    #[test]
+    fn segmentation_execution_rejects_malformed_backend_mask_buffers() {
+        let image = test_image(4, 4);
+        let request = ImageSegmentationRequest::new(
+            ImageSegmentationPrompt::new().point(SegmentationPoint::foreground(1, 1)),
+        );
+
+        for data in [vec![u8::MAX], vec![u8::MAX; 17]] {
+            let actual = data.len();
+            let segment = ImageSegment {
+                label: None,
+                score: None,
+                region: BoundingBox::new(0, 0, 1, 1).unwrap(),
+                mask: BinaryMask {
+                    width: 4,
+                    height: 4,
+                    data,
+                },
+                attributes: BTreeMap::new(),
+            };
+            let mut backend = StubSegmentationBackend {
+                segments: vec![segment],
+            };
+            let error =
+                segment_image_with_backend(&mut backend, &image.as_view(), &request).unwrap_err();
+            assert!(matches!(
+                error,
+                DetectError::InvalidFrameBuffer {
+                    expected: 16,
+                    actual: observed,
+                } if observed == actual
+            ));
+        }
     }
 
     #[test]
