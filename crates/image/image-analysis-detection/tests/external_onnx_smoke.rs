@@ -18,7 +18,7 @@ fn fixture_path() -> PathBuf {
         .join("coco-000000039769.png")
 }
 
-fn run_detection(min_score: f32) -> serde_json::Value {
+fn run_detection_with_limit(min_score: f32, limit: usize) -> serde_json::Value {
     let root = workspace_root();
     let fixture = fixture_path();
     assert!(
@@ -35,11 +35,15 @@ fn run_detection(min_score: f32) -> serde_json::Value {
             "model": "xenova-detr-resnet-50-onnx",
             "autoDownload": true,
             "minScore": min_score,
-            "limit": 20
+            "limit": limit
         }),
     })
     .expect("run detection surface")
     .value
+}
+
+fn run_detection(min_score: f32) -> serde_json::Value {
+    run_detection_with_limit(min_score, 20)
 }
 
 #[test]
@@ -95,5 +99,24 @@ fn standard_detection_surface_places_cats_on_both_sides_of_fixture() {
     assert!(
         cat_centers.iter().any(|center| *center >= 320),
         "expected a cat detection in the right half, got {cat_centers:?}"
+    );
+}
+
+#[test]
+#[ignore = "downloads/uses local DETR ONNX bundle and requires ONNX Runtime"]
+fn standard_detection_surface_sorts_by_score_and_respects_limit() {
+    let limit = 3;
+    let value = run_detection_with_limit(0.0, limit);
+    assert_eq!(value["limit"], limit);
+    let detections = value["detections"].as_array().expect("detections array");
+    assert_eq!(detections.len(), limit, "expected the requested top-k results");
+
+    let scores = detections
+        .iter()
+        .map(|detection| detection["score"].as_f64().expect("numeric detection score"))
+        .collect::<Vec<_>>();
+    assert!(
+        scores.windows(2).all(|pair| pair[0] >= pair[1]),
+        "expected detections sorted by descending score, got {scores:?}"
     );
 }
