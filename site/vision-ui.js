@@ -5,7 +5,7 @@ import {
   detectOpenVocabulary,
   prepareSamImage,
   segmentSamBox,
-  segmentSamPoint,
+  segmentSamPoints,
 } from "./vision-models.js";
 
 const MAX_SAM_REFINEMENTS = 5;
@@ -111,6 +111,7 @@ const capability = document.getElementById("vision-runtime-capability");
 let imageUrl = "";
 let samSession = null;
 let samReady = false;
+let samPoints = [];
 let running = false;
 let lastDetections = [];
 
@@ -158,6 +159,7 @@ function resetForImage() {
   imageUrl = nextUrl;
   samSession = null;
   samReady = false;
+  samPoints = [];
   lastDetections = [];
   clearOverlay();
 
@@ -256,6 +258,7 @@ async function ensureSamSession() {
 
 async function runConceptDetection() {
   if (!imageUrl || running) return;
+  samPoints = [];
   setBusy(true);
   clearResults();
   setStatus(`Loading ${OPEN_VOCAB_MODEL_ID} and detecting requested concepts locally…`);
@@ -294,6 +297,7 @@ async function runConceptDetection() {
 
 async function refineDetectionsWithSam() {
   if (!imageUrl || running || lastDetections.length === 0) return;
+  samPoints = [];
   setBusy(true);
   clearResults();
   const candidates = lastDetections
@@ -342,19 +346,24 @@ async function refineDetectionsWithSam() {
 
 async function prepareSam() {
   if (!imageUrl || running) return;
+  samPoints = [];
   setBusy(true);
-  clearResults();
+  clearOverlay();
   setStatus(`Loading ${SAM_MODEL_ID} and computing the image embedding locally…`);
   try {
     await ensureSamSession();
     setStatus(
-      "SAM is ready. Left-click the image for a foreground point; right-click for a background point.",
+      "SAM is ready. Left-click adds a foreground point; right-click adds a background point. Each successful click refines the cumulative prompt.",
       "success",
     );
-    appendResult("SAM ready", "The image embedding stays in browser memory; points and detector boxes reuse it.");
+    appendResult(
+      "SAM ready",
+      "The image embedding stays in browser memory; interactive points accumulate until you clear the overlay or change modes.",
+    );
   } catch (error) {
     samSession = null;
     samReady = false;
+    samPoints = [];
     overlay.classList.remove("is-sam-ready");
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
@@ -374,18 +383,25 @@ async function segmentAtPointer(event) {
     y: (event.clientY - bounds.top) / bounds.height,
     label: event.button === 2 ? 0 : 1,
   };
+  const nextPoints = [...samPoints, point];
 
   setBusy(true);
-  setStatus("Decoding a SAM mask from the cached image embedding…");
+  setStatus(
+    `Decoding a SAM mask from ${nextPoints.length} cumulative point${nextPoints.length === 1 ? "" : "s"} on the cached image embedding…`,
+  );
   try {
-    const segment = await segmentSamPoint(samSession, point);
+    const segment = await segmentSamPoints(samSession, nextPoints);
+    samPoints = nextPoints;
     drawMask(segment);
     clearResults();
     appendResult(
       "SAM mask",
-      `${segment.score == null ? "unscored" : `${(segment.score * 100).toFixed(1)}%`} · ${segment.activePixels.toLocaleString()} pixels · ${segment.region ? `${segment.region.width}×${segment.region.height} bounds` : "empty mask"}`,
+      `${segment.score == null ? "unscored" : `${(segment.score * 100).toFixed(1)}%`} · ${segment.activePixels.toLocaleString()} pixels · ${segment.region ? `${segment.region.width}×${segment.region.height} bounds` : "empty mask"} · ${samPoints.length} prompt point${samPoints.length === 1 ? "" : "s"}`,
     );
-    setStatus("SAM mask decoded locally. Click another point to refine the selection.", "success");
+    setStatus(
+      `SAM mask refined locally with ${samPoints.length} cumulative point${samPoints.length === 1 ? "" : "s"}. Add another foreground or background point to refine it further.`,
+      "success",
+    );
   } catch (error) {
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
@@ -402,10 +418,11 @@ detectButton.addEventListener("click", runConceptDetection);
 refineButton.addEventListener("click", refineDetectionsWithSam);
 samButton.addEventListener("click", prepareSam);
 clearButton.addEventListener("click", () => {
+  samPoints = [];
   clearOverlay();
   setStatus(
     samReady
-      ? "Overlay cleared; SAM remains ready and cached for point or box prompts."
+      ? "Overlay and SAM point prompts cleared; the cached image embedding remains ready for a new prompt."
       : lastDetections.length > 0
         ? "Overlay cleared; detector results are still available for SAM refinement."
         : "Overlay cleared.",
