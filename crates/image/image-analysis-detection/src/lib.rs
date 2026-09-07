@@ -10,7 +10,7 @@ use image_analysis_processing::{
     validate_image_model_preprocessing, ImageModelPreprocessing, ImageModelTensor,
 };
 use image_analysis_segmentation::{
-    ImageSegment, ImageSegmentationBackend, ImageSegmentationRequest,
+    segment_image_with_backend, ImageSegment, ImageSegmentationBackend, ImageSegmentationRequest,
 };
 use model_runtime::{HuggingFaceModelSpec, ModelTask};
 use video_analysis_core::{BoundingBox, DetectError, FramePosition, Result, VideoFrame};
@@ -318,7 +318,7 @@ impl<B> MaskProposalDetector<B> {
     pub fn new(backend: B) -> Self {
         Self {
             backend,
-            request: ImageDetectionRequest::default(),
+            request: ImageDetectionRequest::automatic_mask_proposals(),
         }
     }
 
@@ -342,9 +342,11 @@ impl<B> MaskProposalDetector<B> {
 impl<B: ImageSegmentationBackend> MaskProposalDetector<B> {
     /// Returns detect image.
     pub fn detect_image(&mut self, image: &ImageView<'_>) -> Result<Vec<ImageDetection>> {
-        let segments = self
-            .backend
-            .segment_image(image, &self.request.segmentation)?;
+        let segments = segment_image_with_backend(
+            &mut self.backend,
+            image,
+            &self.request.segmentation,
+        )?;
         Ok(segments_to_detections(
             &segments,
             self.request.min_mask_pixels,

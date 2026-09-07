@@ -350,6 +350,124 @@ pub trait ImageSegmentationBackend {
     ) -> Result<Vec<ImageSegment>>;
 }
 
+/// Executes one segmentation request through a backend while enforcing the
+/// library-owned request and result invariants shared by every backend.
+pub fn segment_image_with_backend<B: ImageSegmentationBackend + ?Sized>(
+    backend: &mut B,
+    image: &ImageView<'_>,
+    request: &ImageSegmentationRequest,
+) -> Result<Vec<ImageSegment>> {
+    validate_segmentation_request(image, request)?;
+
+    let segments = backend.segment_image(image, request)?;
+    let mut accepted = Vec::with_capacity(segments.len());
+    for (index, segment) in segments.into_iter().enumerate() {
+        validate_backend_segment(image, index, &segment)?;
+        if segment.mask.active_pixels() >= request.min_mask_pixels {
+            accepted.push(segment);
+        }
+    }
+
+    if !request.prompt.multimask_output && accepted.len() > 1 {
+        return Err(DetectError::InvalidArgument(format!(
+            "segmentation backend returned {} masks while multimask_output is false",
+            accepted.len()
+        )));
+    }
+
+    Ok(accepted)
+}
+
+fn validate_segmentation_request(
+    image: &ImageView<'_>,
+    request: &ImageSegmentationRequest,
+) -> Result<()> {
+    if request.min_mask_pixels == 0 {
+        return Err(DetectError::InvalidArgument(
+            "min_mask_pixels must be greater than zero".to_string(),
+        ));
+    }
+
+    let prompt = &request.prompt;
+    let has_explicit_prompt = !prompt.points.is_empty() || !prompt.boxes.is_empty();
+    if prompt.automatic_mask_generation && has_explicit_prompt {
+        return Err(DetectError::InvalidArgument(
+            "automatic mask generation cannot be combined with point or box prompts".to_string(),
+        ));
+    }
+    if !prompt.automatic_mask_generation && !has_explicit_prompt {
+        return Err(DetectError::InvalidArgument(
+            "manual segmentation requires at least one point or box prompt".to_string(),
+        ));
+    }
+
+    for point in &prompt.points {
+        if point.x >= image.width || point.y >= image.height {
+            return Err(DetectError::InvalidArgument(format!(
+                "segmentation point ({}, {}) must fit inside image dimensions {}x{}",
+                point.x, point.y, image.width, image.height
+            )));
+        }
+    }
+
+    for region in &prompt.boxes {
+        if region.x.saturating_add(region.width) > image.width
+            || region.y.saturating_add(region.height) > image.height
+        {
+            return Err(DetectError::InvalidArgument(format!(
+                "segmentation box at ({}, {}) with size {}x{} must fit inside image dimensions {}x{}",
+                region.x,
+                region.y,
+                region.width,
+                region.height,
+                image.width,
+                image.height
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_backend_segment(
+    image: &ImageView<'_>,
+    index: usize,
+    segment: &ImageSegment,
+) -> Result<()> {
+    if segment.mask.width != image.width || segment.mask.height != image.height {
+        return Err(DetectError::InvalidArgument(format!(
+            "segmentation backend mask {index} has dimensions {}x{}; expected {}x{}",
+            segment.mask.width, segment.mask.height, image.width, image.height
+        )));
+    }
+
+    let expected = segment.mask.width as usize * segment.mask.height as usize;
+    if segment.mask.data.len() != expected {
+        return Err(DetectError::InvalidFrameBuffer {
+            expected,
+            actual: segment.mask.data.len(),
+        });
+    }
+
+    let bounds = segment.mask.bounding_box().ok_or_else(|| {
+        DetectError::InvalidArgument(format!(
+            "segmentation backend mask {index} contains no active pixels"
+        ))
+    })?;
+    if bounds != segment.region {
+        return Err(DetectError::InvalidArgument(format!(
+            "segmentation backend mask {index} region does not match its active mask bounds"
+        )));
+    }
+    if segment.score.is_some_and(|score| !score.is_finite()) {
+        return Err(DetectError::InvalidArgument(format!(
+            "segmentation backend mask {index} score must be finite"
+        )));
+    }
+
+    Ok(())
+}
+
 /// Trait for model-backed image segmentation backend implementations.
 pub trait ModelBackedImageSegmentationBackend: ImageSegmentationBackend {
     /// Returns model spec.
@@ -359,6 +477,36 @@ pub trait ModelBackedImageSegmentationBackend: ImageSegmentationBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct StubSegmentationBackend {
+        segments: Vec<ImageSegment>,
+    }
+
+    impl ImageSegmentationBackend for StubSegmentationBackend {
+        fn segment_image(
+            &mut self,
+            _image: &ImageView<'_>,
+            _request: &ImageSegmentationRequest,
+        ) -> Result<Vec<ImageSegment>> {
+            Ok(self.segments.clone())
+        }
+    }
+
+    fn test_image(width: u32, height: u32) -> OwnedImage {
+        OwnedImage::new(
+            width,
+            height,
+            ImagePixelFormat::Gray8,
+            vec![0; width as usize * height as usize],
+            width as usize,
+        )
+        .unwrap()
+    }
+
+    fn rect_segment(width: u32, height: u32, region: BoundingBox) -> ImageSegment {
+        ImageSegment::new(BinaryMask::filled_rect(width, height, region).unwrap()).unwrap()
+    }
 
     #[test]
     fn binary_mask_bounding_box_tracks_active_region() {
@@ -389,6 +537,127 @@ mod tests {
         let request = ImageSegmentationRequest::automatic_mask_generation();
         assert!(request.prompt.automatic_mask_generation);
         assert!(request.prompt.multimask_output);
+    }
+
+    #[test]
+    fn segmentation_execution_filters_masks_below_minimum_size() {
+        let image = test_image(4, 4);
+        let mut backend = StubSegmentationBackend {
+            segments: vec![
+                rect_segment(4, 4, BoundingBox::new(0, 0, 1, 1).unwrap()),
+                rect_segment(4, 4, BoundingBox::new(1, 1, 2, 2).unwrap()),
+            ],
+        };
+        let request = ImageSegmentationRequest::new(
+            ImageSegmentationPrompt::new()
+                .point(SegmentationPoint::foreground(1, 1))
+                .multimask_output(true),
+        )
+        .min_mask_pixels(2);
+
+        let segments = segment_image_with_backend(&mut backend, &image.as_view(), &request).unwrap();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].mask.active_pixels(), 4);
+        assert_eq!(segments[0].region, BoundingBox::new(1, 1, 2, 2).unwrap());
+    }
+
+    #[test]
+    fn segmentation_execution_rejects_manual_requests_without_prompts() {
+        let image = test_image(4, 4);
+        let mut backend = StubSegmentationBackend::default();
+        let error = segment_image_with_backend(
+            &mut backend,
+            &image.as_view(),
+            &ImageSegmentationRequest::default(),
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("manual segmentation requires at least one point or box prompt"));
+    }
+
+    #[test]
+    fn segmentation_execution_rejects_out_of_bounds_points() {
+        let image = test_image(4, 4);
+        let mut backend = StubSegmentationBackend::default();
+        let request = ImageSegmentationRequest::new(
+            ImageSegmentationPrompt::new().point(SegmentationPoint::foreground(4, 0)),
+        );
+        let error =
+            segment_image_with_backend(&mut backend, &image.as_view(), &request).unwrap_err();
+        assert!(error.to_string().contains("must fit inside image dimensions 4x4"));
+    }
+
+    #[test]
+    fn segmentation_execution_rejects_backend_masks_with_wrong_dimensions() {
+        let image = test_image(4, 4);
+        let mut backend = StubSegmentationBackend {
+            segments: vec![rect_segment(
+                3,
+                3,
+                BoundingBox::new(0, 0, 2, 2).unwrap(),
+            )],
+        };
+        let request = ImageSegmentationRequest::new(
+            ImageSegmentationPrompt::new().point(SegmentationPoint::foreground(1, 1)),
+        );
+        let error =
+            segment_image_with_backend(&mut backend, &image.as_view(), &request).unwrap_err();
+        assert!(error.to_string().contains("expected 4x4"));
+    }
+
+    #[test]
+    fn segmentation_execution_rejects_malformed_backend_mask_buffers() {
+        let image = test_image(4, 4);
+        let request = ImageSegmentationRequest::new(
+            ImageSegmentationPrompt::new().point(SegmentationPoint::foreground(1, 1)),
+        );
+
+        for data in [vec![u8::MAX], vec![u8::MAX; 17]] {
+            let actual = data.len();
+            let segment = ImageSegment {
+                label: None,
+                score: None,
+                region: BoundingBox::new(0, 0, 1, 1).unwrap(),
+                mask: BinaryMask {
+                    width: 4,
+                    height: 4,
+                    data,
+                },
+                attributes: BTreeMap::new(),
+            };
+            let mut backend = StubSegmentationBackend {
+                segments: vec![segment],
+            };
+            let error =
+                segment_image_with_backend(&mut backend, &image.as_view(), &request).unwrap_err();
+            assert!(matches!(
+                error,
+                DetectError::InvalidFrameBuffer {
+                    expected: 16,
+                    actual: observed,
+                } if observed == actual
+            ));
+        }
+    }
+
+    #[test]
+    fn segmentation_execution_rejects_multiple_masks_when_multimask_is_disabled() {
+        let image = test_image(4, 4);
+        let mut backend = StubSegmentationBackend {
+            segments: vec![
+                rect_segment(4, 4, BoundingBox::new(0, 0, 2, 2).unwrap()),
+                rect_segment(4, 4, BoundingBox::new(2, 2, 2, 2).unwrap()),
+            ],
+        };
+        let request = ImageSegmentationRequest::new(
+            ImageSegmentationPrompt::new().point(SegmentationPoint::foreground(1, 1)),
+        );
+        let error =
+            segment_image_with_backend(&mut backend, &image.as_view(), &request).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("multimask_output is false"));
     }
 
     #[test]
