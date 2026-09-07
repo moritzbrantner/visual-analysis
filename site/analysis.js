@@ -1,6 +1,8 @@
-import("./vision-ui.js").catch((error) => {
-  console.warn("Learned vision UI failed to initialize", error);
-});
+if (typeof document !== "undefined") {
+  import("./vision-ui.js").catch((error) => {
+    console.warn("Learned vision UI failed to initialize", error);
+  });
+}
 
 export const IMAGE_ANALYSIS_MAX_PIXELS = 786432;
 export const VIDEO_FRAME_MAX_PIXELS = 196608;
