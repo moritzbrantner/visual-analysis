@@ -7,6 +7,7 @@
     "crates/image/image-analysis-detection-server/Cargo.toml",
     "crates/image/image-analysis-detection/Cargo.toml",
     "crates/image/image-analysis-detection/README.md",
+    "crates/image/image-analysis-detection/src/lib.rs",
     "crates/image/image-analysis-detection/src/surface.rs",
     "crates/image/image-analysis-detection/tests/external_onnx_smoke.rs",
     "crates/image/image-analysis-embeddings-cli/Cargo.toml",
