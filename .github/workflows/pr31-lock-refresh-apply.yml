@@ -1,0 +1,86 @@
+name: PR31 lock refresh apply
+
+on:
+  push:
+    branches:
+      - scratch/pr31-lock-refresh
+    paths:
+      - .github/workflows/pr31-lock-refresh-apply.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Apply exact Cargo.lock refresh to PR 31
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          import urllib.parse
+          import urllib.request
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          token = os.environ["GH_TOKEN"]
+          api = f"https://api.github.com/repos/{repo}"
+          target_branch = "codex/detection-regression-evidence"
+          expected_head = "9822237377297400087c0e9423806cde5cc9b984"
+          expected_blob = "61403298bdf315e6ec261270d085a25aba33da97"
+
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+              "User-Agent": "visual-analysis-pr31-lock-refresh",
+          }
+
+          def request(url, *, method="GET", data=None):
+              payload = None if data is None else json.dumps(data).encode("utf-8")
+              req = urllib.request.Request(url, data=payload, headers=headers, method=method)
+              with urllib.request.urlopen(req) as response:
+                  return json.load(response)
+
+          encoded_branch = urllib.parse.quote(target_branch, safe="")
+          ref = request(f"{api}/git/ref/heads/{encoded_branch}")
+          actual_head = ref["object"]["sha"]
+          if actual_head != expected_head:
+              raise SystemExit(f"refusing stale write: expected {expected_head}, got {actual_head}")
+
+          file_info = request(f"{api}/contents/Cargo.lock?ref={encoded_branch}")
+          original = base64.b64decode(file_info["content"])
+          needle = (
+              b' "moenarch-image-analysis-detection",\n'
+              b' "moenarch-model-runtime",\n'
+          )
+          replacement = (
+              b' "moenarch-image-analysis-detection",\n'
+              b' "moenarch-image-analysis-ocr",\n'
+              b' "moenarch-model-runtime",\n'
+          )
+          if original.count(needle) != 1:
+              raise SystemExit(f"expected exactly one lockfile insertion point, found {original.count(needle)}")
+
+          refreshed = original.replace(needle, replacement, 1)
+          blob_input = b"blob " + str(len(refreshed)).encode("ascii") + b"\0" + refreshed
+          blob_sha = hashlib.sha1(blob_input).hexdigest()
+          if blob_sha != expected_blob:
+              raise SystemExit(f"generated blob mismatch: expected {expected_blob}, got {blob_sha}")
+
+          result = request(
+              f"{api}/contents/Cargo.lock",
+              method="PUT",
+              data={
+                  "message": "chore: refresh source-dependency lock",
+                  "content": base64.b64encode(refreshed).decode("ascii"),
+                  "sha": file_info["sha"],
+                  "branch": target_branch,
+              },
+          )
+          print(result["commit"]["sha"])
+          PY
