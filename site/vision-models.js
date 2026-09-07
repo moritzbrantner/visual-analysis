@@ -11,6 +11,7 @@ export const BROWSER_VISION_MODELS = Object.freeze([
     execution: "browser-webgpu",
     optIn: true,
     output: "binary-mask",
+    prompts: Object.freeze(["point", "box"]),
   }),
   Object.freeze({
     id: OPEN_VOCAB_MODEL_ID,
@@ -18,6 +19,7 @@ export const BROWSER_VISION_MODELS = Object.freeze([
     execution: "browser-webgpu-or-wasm",
     optIn: true,
     output: "canonical-detection-shape",
+    prompts: Object.freeze(["text"]),
   }),
 ]);
 
@@ -66,8 +68,18 @@ export async function prepareSamImage(imageUrl) {
   return { ...runtime, image, processed, embeddings };
 }
 
+function requireSamSession(session) {
+  if (!session?.embeddings || !session?.processed || !session?.Tensor) {
+    throw new Error("SAM image embeddings are not ready.");
+  }
+}
+
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, Number(value) || 0));
 }
 
 export function summarizeBinaryMask(data, width, height) {
@@ -102,26 +114,43 @@ export function summarizeBinaryMask(data, width, height) {
   };
 }
 
-export async function segmentSamPoint(session, point) {
-  if (!session?.embeddings || !session?.processed) {
-    throw new Error("SAM image embeddings are not ready.");
+export function scalePixelBoxToSamInput(region, originalSize, reshapedSize) {
+  const originalHeight = Number(originalSize?.[0]);
+  const originalWidth = Number(originalSize?.[1]);
+  const reshapedHeight = Number(reshapedSize?.[0]);
+  const reshapedWidth = Number(reshapedSize?.[1]);
+  if (
+    ![originalHeight, originalWidth, reshapedHeight, reshapedWidth].every(
+      (value) => Number.isFinite(value) && value > 0,
+    )
+  ) {
+    throw new Error("SAM image dimensions must be positive finite values.");
   }
 
-  const normalizedX = clamp01(point?.x);
-  const normalizedY = clamp01(point?.y);
-  const label = point?.label === 0 ? 0 : 1;
-  const reshaped = session.processed.reshaped_input_sizes[0];
-  const inputPoints = new session.Tensor(
-    "float32",
-    [normalizedX * reshaped[1], normalizedY * reshaped[0]],
-    [1, 1, 1, 2],
-  );
-  const inputLabels = new session.Tensor("int64", [BigInt(label)], [1, 1, 1]);
+  const rawX = Number(region?.x) || 0;
+  const rawY = Number(region?.y) || 0;
+  const rawWidth = Math.max(0, Number(region?.width) || 0);
+  const rawHeight = Math.max(0, Number(region?.height) || 0);
+  const x1 = clamp(rawX, 0, originalWidth);
+  const y1 = clamp(rawY, 0, originalHeight);
+  const x2 = clamp(rawX + rawWidth, 0, originalWidth);
+  const y2 = clamp(rawY + rawHeight, 0, originalHeight);
+  if (x2 <= x1 || y2 <= y1) {
+    throw new Error("SAM box prompts must have a non-zero region inside the image.");
+  }
 
+  return [
+    (x1 * reshapedWidth) / originalWidth,
+    (y1 * reshapedHeight) / originalHeight,
+    (x2 * reshapedWidth) / originalWidth,
+    (y2 * reshapedHeight) / originalHeight,
+  ];
+}
+
+async function decodeBestSamMask(session, modelInputs, prompt) {
   const { pred_masks: predMasks, iou_scores: iouScores } = await session.model({
     ...session.embeddings,
-    input_points: inputPoints,
-    input_labels: inputLabels,
+    ...modelInputs,
   });
   const masks = await session.processor.post_process_masks(
     predMasks,
@@ -152,8 +181,63 @@ export async function segmentSamPoint(session, point) {
     data,
     activePixels: summary.activePixels,
     region: summary.region,
-    prompt: { x: normalizedX, y: normalizedY, label },
+    prompt,
   };
+}
+
+export async function segmentSamPoint(session, point) {
+  requireSamSession(session);
+
+  const normalizedX = clamp01(point?.x);
+  const normalizedY = clamp01(point?.y);
+  const label = point?.label === 0 ? 0 : 1;
+  const reshaped = session.processed.reshaped_input_sizes[0];
+  const inputPoints = new session.Tensor(
+    "float32",
+    [normalizedX * reshaped[1], normalizedY * reshaped[0]],
+    [1, 1, 1, 2],
+  );
+  const inputLabels = new session.Tensor("int64", [BigInt(label)], [1, 1, 1]);
+
+  return decodeBestSamMask(
+    session,
+    { input_points: inputPoints, input_labels: inputLabels },
+    { type: "point", x: normalizedX, y: normalizedY, label },
+  );
+}
+
+export async function segmentSamBox(session, region) {
+  requireSamSession(session);
+
+  const original = session.processed.original_sizes[0];
+  const reshaped = session.processed.reshaped_input_sizes[0];
+  const box = scalePixelBoxToSamInput(region, original, reshaped);
+  const inputBoxes = new session.Tensor("float32", box, [1, 1, 4]);
+
+  // Transformers.js' SAM forward path derives default point labels from
+  // input_points before passing optional boxes to the decoder. A single padding
+  // point keeps the box-only prompt explicit without contributing a foreground
+  // or background point to the prompt encoder.
+  const inputPoints = new session.Tensor("float32", [0, 0], [1, 1, 1, 2]);
+  const inputLabels = new session.Tensor("int64", [BigInt(-10)], [1, 1, 1]);
+
+  return decodeBestSamMask(
+    session,
+    {
+      input_points: inputPoints,
+      input_labels: inputLabels,
+      input_boxes: inputBoxes,
+    },
+    {
+      type: "box",
+      region: {
+        x: Math.round(Number(region?.x) || 0),
+        y: Math.round(Number(region?.y) || 0),
+        width: Math.round(Number(region?.width) || 0),
+        height: Math.round(Number(region?.height) || 0),
+      },
+    },
+  );
 }
 
 export function normalizeOpenVocabularyDetection(detection) {

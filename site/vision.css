@@ -4,7 +4,7 @@
 
 .vision-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
   gap: 0.75rem;
   align-items: end;
 }
@@ -78,6 +78,16 @@
 #vision-overlay.is-sam-ready {
   pointer-events: auto;
   cursor: crosshair;
+}
+
+@media (max-width: 980px) {
+  .vision-controls {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .vision-field {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 800px) {
