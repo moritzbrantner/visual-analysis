@@ -5,6 +5,7 @@ import {
   BROWSER_VISION_MODELS,
   OPEN_VOCAB_MODEL_ID,
   SAM_MODEL_ID,
+  buildSamPointPrompt,
   normalizeOpenVocabularyDetection,
   scalePixelBoxToSamInput,
   summarizeBinaryMask,
@@ -37,6 +38,35 @@ test("open-vocabulary detections normalize to the canonical pixel-region shape",
         promptKind: "text",
       },
     },
+  );
+});
+
+test("SAM point prompts preserve cumulative order, labels, and resized coordinates", () => {
+  assert.deepEqual(
+    buildSamPointPrompt(
+      [
+        { x: 0.25, y: 0.5, label: 1 },
+        { x: 1.2, y: -0.1, label: 0 },
+      ],
+      [200, 400],
+    ),
+    {
+      coordinates: [100, 100, 400, 0],
+      labels: [1, 0],
+      normalizedPoints: [
+        { x: 0.25, y: 0.5, label: 1 },
+        { x: 1, y: 0, label: 0 },
+      ],
+      pointCount: 2,
+    },
+  );
+});
+
+test("SAM point prompts require at least one point and valid resized dimensions", () => {
+  assert.throws(() => buildSamPointPrompt([], [200, 400]), /at least one point/);
+  assert.throws(
+    () => buildSamPointPrompt([{ x: 0.5, y: 0.5, label: 1 }], [0, 400]),
+    /positive finite values/,
   );
 });
 
