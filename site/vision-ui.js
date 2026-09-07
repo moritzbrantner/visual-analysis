@@ -326,8 +326,13 @@ clearButton.addEventListener("click", () => {
 });
 overlay.addEventListener("mousedown", segmentAtPointer);
 overlay.addEventListener("contextmenu", (event) => event.preventDefault());
-previewImage.addEventListener("load", resetForImage);
+previewImage.addEventListener("load", () => {
+  resetForImage();
+  if (imageUrl && previewImage.naturalWidth > 0 && previewImage.naturalHeight > 0) {
+    configureOverlay(previewImage.naturalWidth, previewImage.naturalHeight);
+  }
+});
 
-const observer = new MutationObserver(resetForImage);
+const observer = new MutationObserver(() => resetForImage());
 observer.observe(previewImage, { attributes: true, attributeFilter: ["src", "hidden"] });
 resetForImage();
