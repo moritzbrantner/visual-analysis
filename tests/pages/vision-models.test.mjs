@@ -6,15 +6,16 @@ import {
   OPEN_VOCAB_MODEL_ID,
   SAM_MODEL_ID,
   normalizeOpenVocabularyDetection,
+  scalePixelBoxToSamInput,
   summarizeBinaryMask,
 } from "../../site/vision-models.js";
 
 test("browser learned vision models are explicit and opt-in", () => {
   assert.deepEqual(
-    BROWSER_VISION_MODELS.map(({ id, optIn }) => ({ id, optIn })),
+    BROWSER_VISION_MODELS.map(({ id, optIn, prompts }) => ({ id, optIn, prompts })),
     [
-      { id: SAM_MODEL_ID, optIn: true },
-      { id: OPEN_VOCAB_MODEL_ID, optIn: true },
+      { id: SAM_MODEL_ID, optIn: true, prompts: ["point", "box"] },
+      { id: OPEN_VOCAB_MODEL_ID, optIn: true, prompts: ["text"] },
     ],
   );
 });
@@ -36,6 +37,32 @@ test("open-vocabulary detections normalize to the canonical pixel-region shape",
         promptKind: "text",
       },
     },
+  );
+});
+
+test("SAM box prompts scale from original pixels into the resized prompt space", () => {
+  assert.deepEqual(
+    scalePixelBoxToSamInput(
+      { x: 100, y: 50, width: 300, height: 200 },
+      [500, 1000],
+      [512, 1024],
+    ),
+    [102.4, 51.2, 409.6, 256],
+  );
+});
+
+test("SAM box prompts clamp to the image and reject empty regions", () => {
+  assert.deepEqual(
+    scalePixelBoxToSamInput(
+      { x: -10, y: 25, width: 120, height: 100 },
+      [100, 100],
+      [1024, 1024],
+    ),
+    [0, 256, 1024, 1024],
+  );
+  assert.throws(
+    () => scalePixelBoxToSamInput({ x: 20, y: 20, width: 0, height: 5 }, [100, 100], [1024, 1024]),
+    /non-zero region/,
   );
 });
 
