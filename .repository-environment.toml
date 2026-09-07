@@ -7,7 +7,7 @@ track = "latest-stable"
 apt = []
 
 [setup]
-commands = ["bun install --frozen-lockfile", "cargo fetch --locked"]
+commands = ["bun install --frozen-lockfile", "cargo fetch && git diff -- Cargo.lock"]
 
 [maintenance]
 commands = ["bun install --frozen-lockfile", "cargo fetch --locked"]
