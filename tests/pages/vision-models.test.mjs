@@ -51,14 +51,14 @@ test("SAM box prompts scale from original pixels into the resized prompt space",
   );
 });
 
-test("SAM box prompts clamp to the image and reject empty regions", () => {
+test("SAM box prompts clamp original edges to the image and reject empty regions", () => {
   assert.deepEqual(
     scalePixelBoxToSamInput(
-      { x: -10, y: 25, width: 120, height: 100 },
+      { x: -50, y: 25, width: 60, height: 100 },
       [100, 100],
       [1024, 1024],
     ),
-    [0, 256, 1024, 1024],
+    [0, 256, 102.4, 1024],
   );
   assert.throws(
     () => scalePixelBoxToSamInput({ x: 20, y: 20, width: 0, height: 5 }, [100, 100], [1024, 1024]),
