@@ -9,10 +9,7 @@ pub use audio_contracts::{
 pub use media_core::{
     AnalysisEvent, AudioSampleFormat, DetectError, PixelFormat, Result, Timebase, Timestamp,
 };
-pub use text_core::{
-    OwnedTextSegment, TextAnalysis, TextAnalysisResult, TextAnalyzer, TextPipeline,
-    TextPipelineBuilder, TextSegment,
-};
+pub use text_core::{OwnedTextSegment, TextSegment};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -2058,43 +2055,6 @@ mod tests {
         assert_eq!(analysis.frames_processed, 1);
         assert_eq!(analysis.events[0].label, "loud");
         assert_eq!(pipeline.finish_analysis().unwrap().events.len(), 1);
-    }
-
-    #[test]
-    fn text_pipeline_processes_segments_incrementally() {
-        struct KeywordAnalyzer;
-
-        impl TextAnalyzer for KeywordAnalyzer {
-            fn name(&self) -> &str {
-                "keyword"
-            }
-
-            fn process_segment(&mut self, segment: &TextSegment<'_>) -> Result<Vec<AnalysisEvent>> {
-                Ok(segment
-                    .text
-                    .contains("cut")
-                    .then(|| {
-                        let mut event = AnalysisEvent::new(self.name(), "keyword").score(1.0);
-                        if let Some(timestamp) = segment.timestamp {
-                            event = event.at_timestamp(timestamp);
-                        }
-                        event
-                    })
-                    .into_iter()
-                    .collect())
-            }
-        }
-
-        let mut pipeline = TextPipeline::builder()
-            .analyzer(KeywordAnalyzer)
-            .build()
-            .unwrap();
-        let segment = OwnedTextSegment::new(0, "find this cut point");
-
-        let analysis = pipeline.process_segment(segment).unwrap();
-        assert_eq!(analysis.segments_processed, 1);
-        assert_eq!(analysis.events[0].analyzer, "keyword");
-        assert_eq!(pipeline.finish_analysis().unwrap().segments_processed, 1);
     }
 
     #[test]
