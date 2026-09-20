@@ -122,15 +122,6 @@ jobs:
           CODING_TOOLING_DIR: ${{ github.workspace }}/.ci/coding-tooling
         run: bash scripts/source-deps deactivate
 
-      - name: Upload environment fingerprint evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: environment-fingerprint-${{ github.sha }}
-          path: .artifacts/environment/*.json
-          if-no-files-found: error
-          retention-days: 7
-
       - name: Activate pinned source dependencies for structural Cargo checks
         env:
           CODING_TOOLING_DIR: ${{ github.workspace }}/.ci/coding-tooling
@@ -156,6 +147,16 @@ jobs:
           mkdir -p .artifacts/environment
           bun .ci/coding-tooling/src/cli.ts environment verify --json \
             > .artifacts/environment/receipt.json
+
+
+      - name: Upload environment fingerprint evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: environment-fingerprint-${{ github.sha }}
+          path: .artifacts/environment/*.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Remove verifier checkout
         if: always()
