@@ -1,7 +1,6 @@
-use std::collections::BTreeSet;
-
 use image_analysis_ocr::{OcrBackend, OcrRequest};
 use video_analysis_core::{DetectError, Observation, Result, Scene, VideoAnalysisPipeline};
+pub use video_analysis_recognition::representative_scene_frames;
 use video_analysis_recognition::{
     analyze_video_text_semantics, OcrVideoAnalyzer, VideoTextSemanticAnalysis,
     VideoTextSemanticContext,
@@ -26,8 +25,8 @@ pub struct SceneAwareOcrAnalysis {
 /// This function deliberately owns no OCR algorithm and no scene detector. The
 /// caller supplies canonical scenes and an `OcrBackend`; this layer only performs
 /// reusable video sampling/composition. Each scene contributes its start, midpoint,
-/// and end frame (deduplicated), allowing downstream applications to avoid running
-/// expensive OCR on every decoded frame while retaining deterministic coverage.
+/// and final included frame (deduplicated), allowing downstream applications to
+/// avoid running expensive OCR on every frame while retaining deterministic coverage.
 pub fn analyze_scene_aware_ocr<S, B>(
     source: &mut S,
     backend: B,
@@ -110,24 +109,6 @@ where
     })
 }
 
-/// Returns the deterministic representative-frame plan for a scene list.
-pub fn representative_scene_frames(scenes: &[Scene]) -> Result<BTreeSet<u64>> {
-    let mut result = BTreeSet::new();
-    for scene in scenes {
-        let start = scene.start.frame_index;
-        let end = scene.end.frame_index;
-        if end < start {
-            return Err(DetectError::InvalidArgument(format!(
-                "scene end frame {end} precedes start frame {start}"
-            )));
-        }
-        result.insert(start);
-        result.insert(start + (end - start) / 2);
-        result.insert(end);
-    }
-    Ok(result)
-}
-
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;
@@ -198,8 +179,16 @@ mod tests {
 
     #[test]
     fn representative_sampling_covers_scene_edges_and_midpoints() {
-        let frames = representative_scene_frames(&[scene(0, 4), scene(5, 8)]).unwrap();
+        let frames = representative_scene_frames(&[scene(0, 5), scene(5, 9)]).unwrap();
         assert_eq!(frames.into_iter().collect::<Vec<_>>(), vec![0, 2, 4, 5, 6, 8]);
+    }
+
+    #[test]
+    fn representative_sampling_handles_short_scenes_and_rejects_empty_intervals() {
+        let frames = representative_scene_frames(&[scene(0, 1), scene(1, 3)]).unwrap();
+        assert_eq!(frames.into_iter().collect::<Vec<_>>(), vec![0, 1, 2]);
+        assert!(representative_scene_frames(&[scene(3, 3)]).is_err());
+        assert!(representative_scene_frames(&[scene(4, 3)]).is_err());
     }
 
     #[test]
@@ -213,7 +202,7 @@ mod tests {
         let frames = (0..=8).map(frame).collect::<VecDeque<_>>();
         let mut source = FixtureSource { info, frames };
         let calls = Rc::new(Cell::new(0));
-        let scenes = vec![scene(0, 4), scene(5, 8)];
+        let scenes = vec![scene(0, 5), scene(5, 9)];
 
         let analysis = analyze_scene_aware_ocr(
             &mut source,

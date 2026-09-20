@@ -7,6 +7,7 @@ import {
   segmentSamBox,
   segmentSamPoints,
 } from "./vision-models.js";
+import { imagePointFromClient } from "./vision-overlay.js";
 
 const MAX_SAM_REFINEMENTS = 5;
 
@@ -143,6 +144,14 @@ function configureOverlay(width, height) {
   overlay.width = Math.max(1, Math.round(width));
   overlay.height = Math.max(1, Math.round(height));
   overlay.hidden = false;
+  alignOverlayToImage();
+}
+
+function alignOverlayToImage() {
+  overlay.style.left = `${previewImage.offsetLeft}px`;
+  overlay.style.top = `${previewImage.offsetTop}px`;
+  overlay.style.width = `${previewImage.clientWidth}px`;
+  overlay.style.height = `${previewImage.clientHeight}px`;
 }
 
 function currentPreviewUrl() {
@@ -198,6 +207,7 @@ function drawDetections(detections) {
   context.lineWidth = Math.max(2, Math.round(Math.min(overlay.width, overlay.height) / 220));
   context.font = `${Math.max(13, Math.round(Math.min(overlay.width, overlay.height) / 35))}px system-ui`;
   context.textBaseline = "bottom";
+  context.strokeStyle = "#ffffff";
 
   for (const detection of detections) {
     const { x, y, width, height } = detection.region;
@@ -206,9 +216,10 @@ function drawDetections(detections) {
     const metrics = context.measureText(label);
     const labelHeight = Math.max(18, Number.parseInt(context.font, 10) + 6);
     const labelY = Math.max(labelHeight, y);
+    context.fillStyle = "#000000";
     context.fillRect(x, labelY - labelHeight, metrics.width + 10, labelHeight);
     context.save();
-    context.globalCompositeOperation = "difference";
+    context.fillStyle = "#ffffff";
     context.fillText(label, x + 5, labelY - 3);
     context.restore();
   }
@@ -376,11 +387,14 @@ async function segmentAtPointer(event) {
   if (event.button !== 0 && event.button !== 2) return;
   event.preventDefault();
 
-  const bounds = overlay.getBoundingClientRect();
-  if (bounds.width <= 0 || bounds.height <= 0) return;
+  const coordinates = imagePointFromClient(
+    event.clientX,
+    event.clientY,
+    previewImage.getBoundingClientRect(),
+  );
+  if (!coordinates) return;
   const point = {
-    x: (event.clientX - bounds.left) / bounds.width,
-    y: (event.clientY - bounds.top) / bounds.height,
+    ...coordinates,
     label: event.button === 2 ? 0 : 1,
   };
   const nextPoints = [...samPoints, point];
@@ -439,4 +453,9 @@ previewImage.addEventListener("load", () => {
 
 const observer = new MutationObserver(() => resetForImage());
 observer.observe(previewImage, { attributes: true, attributeFilter: ["src", "hidden"] });
+// Both observers live for the inspector page's lifetime. Resizing only changes
+// CSS geometry, preserving the canvas bitmap and cached SAM image embedding.
+const previewResizeObserver = new ResizeObserver(alignOverlayToImage);
+previewResizeObserver.observe(previewImage);
+previewResizeObserver.observe(previewImage.parentElement);
 resetForImage();

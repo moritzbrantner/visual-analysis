@@ -916,7 +916,7 @@ impl Default for OnnxFaceDetectionOptions {
                 rescale_factor: 1.0,
                 mean: [0.0, 0.0, 0.0],
                 std: [1.0, 1.0, 1.0],
-                channel_order: ChannelOrder::Rgb,
+                channel_order: ChannelOrder::Bgr,
             },
             score_threshold: 0.9,
             nms_threshold: 0.3,
@@ -1012,13 +1012,52 @@ impl OnnxFaceDetector<UnavailableOnnxFaceDetectionRunner> {
 impl OnnxFaceDetector<runtime_onnx::OnnxSession> {
     /// Builds this value from bundle.
     pub fn from_bundle(bundle: model_runtime::ModelBundle) -> Result<Self> {
+        use runtime_onnx::OnnxRunner;
+
         let info = validate_onnx_face_detection_bundle(&bundle)?;
-        Ok(Self {
-            options: face_detection_options_from_bundle(&bundle)?,
-            runner: runtime_onnx::OnnxSession::from_file(info.model_path)
-                .map_err(runtime_onnx_error)?,
-        })
+        let runner = runtime_onnx::OnnxSession::from_file(info.model_path)
+            .map_err(runtime_onnx_error)?;
+        let mut options = face_detection_options_from_bundle(&bundle)?;
+        let metadata = runner.metadata().map_err(runtime_onnx_error)?;
+        let input = metadata.inputs.first().ok_or_else(|| {
+            DetectError::InvalidArgument("YuNet model has no image input".to_string())
+        })?;
+        configure_face_model_input(&mut options.preprocessing, input)?;
+        Ok(Self { options, runner })
     }
+}
+
+#[cfg(feature = "onnx")]
+fn configure_face_model_input(
+    preprocessing: &mut ImageModelPreprocessing,
+    input: &runtime_onnx::OnnxIoInfo,
+) -> Result<()> {
+    use runtime_onnx::OnnxDimension;
+
+    let [batch, channels, height, width] = input.dimensions.as_slice() else {
+        return Err(DetectError::InvalidArgument(
+            "YuNet image input must have NCHW dimensions".to_string(),
+        ));
+    };
+    if matches!(batch, OnnxDimension::Fixed(value) if *value != 1)
+        || matches!(channels, OnnxDimension::Fixed(value) if *value != 3)
+    {
+        return Err(DetectError::InvalidArgument(
+            "YuNet image input requires one three-channel image".to_string(),
+        ));
+    }
+    // Unlike OpenCV DNN, ONNX Runtime enforces the model's declared fixed shape.
+    for (dimension, target) in [
+        (width, &mut preprocessing.input_width),
+        (height, &mut preprocessing.input_height),
+    ] {
+        if let OnnxDimension::Fixed(value) = dimension {
+            *target = u32::try_from(*value).map_err(|_| {
+                DetectError::InvalidArgument("YuNet input dimension exceeds u32".to_string())
+            })?;
+        }
+    }
+    validate_image_model_preprocessing(preprocessing)
 }
 
 impl<R: OnnxFaceDetectionRunner> OnnxFaceDetector<R> {
@@ -1151,7 +1190,14 @@ pub fn decode_yunet_face_detections(
     options: &OnnxFaceDetectionOptions,
     original_size: (u32, u32),
 ) -> Result<Vec<FaceDetection>> {
-    let mut detections = if let Some(tensor) = output
+    let modern_layout = output.tensors.keys().any(|name| {
+        ["cls_", "obj_", "bbox_", "kps_"]
+            .iter()
+            .any(|prefix| name.starts_with(*prefix))
+    });
+    let mut detections = if modern_layout {
+        decode_yunet_2023_tensors(output, options, original_size)?
+    } else if let Some(tensor) = output
         .tensors
         .values()
         .find(|tensor| output_last_dim_any(&tensor.shape) == Some(15))
@@ -1385,6 +1431,110 @@ fn decode_yunet_single_tensor(
         }
     }
     Ok(detections)
+}
+
+// YuNet 2023 uses anchor-free grid offsets, not the legacy loc/conf/iou priors.
+// Contract: OpenCV modules/objdetect/src/face_detect.cpp, FaceDetectorYNImpl::postProcess.
+fn decode_yunet_2023_tensors(
+    output: &OnnxFaceDetectionOutput,
+    options: &OnnxFaceDetectionOptions,
+    original_size: (u32, u32),
+) -> Result<Vec<FaceDetection>> {
+    let width = options.preprocessing.input_width;
+    let height = options.preprocessing.input_height;
+    if width == 0 || height == 0 || width % 32 != 0 || height % 32 != 0 {
+        return Err(DetectError::InvalidArgument(
+            "YuNet 2023 input dimensions must be positive multiples of 32".to_string(),
+        ));
+    }
+    let mut detections = Vec::new();
+    for stride in [8_u32, 16, 32] {
+        let columns = (width / stride) as usize;
+        let rows = columns
+            .checked_mul((height / stride) as usize)
+            .ok_or_else(|| {
+                DetectError::InvalidArgument("YuNet output grid size overflows".to_string())
+            })?;
+        let cls = yunet_2023_tensor(output, "cls", stride, rows, 1)?;
+        let obj = yunet_2023_tensor(output, "obj", stride, rows, 1)?;
+        let bbox = yunet_2023_tensor(output, "bbox", stride, rows, 4)?;
+        let kps = yunet_2023_tensor(output, "kps", stride, rows, 10)?;
+        for index in 0..rows {
+            let confidence = cls.values[index];
+            let objectness = obj.values[index];
+            if !confidence.is_finite() || !objectness.is_finite() {
+                continue;
+            }
+            let score = (confidence.clamp(0.0, 1.0) * objectness.clamp(0.0, 1.0)).sqrt();
+            if score < options.score_threshold {
+                continue;
+            }
+            let x = (index % columns) as f32;
+            let y = (index / columns) as f32;
+            let stride = stride as f32;
+            let offsets = &bbox.values[index * 4..index * 4 + 4];
+            let cx = (x + offsets[0]) * stride;
+            let cy = (y + offsets[1]) * stride;
+            let box_width = offsets[2].exp() * stride;
+            let box_height = offsets[3].exp() * stride;
+            let bounds = [
+                (cx - box_width / 2.0) / width as f32,
+                (cy - box_height / 2.0) / height as f32,
+                (cx + box_width / 2.0) / width as f32,
+                (cy + box_height / 2.0) / height as f32,
+            ];
+            let mut landmarks = [0.0; 10];
+            for (point, pair) in kps.values[index * 10..index * 10 + 10]
+                .chunks_exact(2)
+                .enumerate()
+            {
+                landmarks[point * 2] = (x + pair[0]) * stride / width as f32;
+                landmarks[point * 2 + 1] = (y + pair[1]) * stride / height as f32;
+            }
+            if bounds
+                .iter()
+                .chain(landmarks.iter())
+                .any(|value| !value.is_finite())
+            {
+                continue;
+            }
+            // Explicitly normalize and clip before entering the legacy helper,
+            // whose coordinate heuristic would misread near-origin pixel values.
+            let bounds = bounds.map(|value| value.clamp(0.0, 1.0));
+            let landmarks = landmarks.map(|value| value.clamp(0.0, 1.0));
+            if let Some(detection) = face_detection_from_xyxy(
+                bounds,
+                score,
+                &landmarks,
+                options,
+                original_size,
+            )? {
+                detections.push(detection);
+            }
+        }
+    }
+    Ok(detections)
+}
+
+fn yunet_2023_tensor<'a>(
+    output: &'a OnnxFaceDetectionOutput,
+    head: &str,
+    stride: u32,
+    rows: usize,
+    columns: usize,
+) -> Result<&'a runtime_onnx::OnnxF32Tensor> {
+    let name = format!("{head}_{stride}");
+    let tensor = output.tensors.get(&name).ok_or_else(|| {
+        DetectError::InvalidArgument(format!("YuNet output is missing `{name}` tensor"))
+    })?;
+    if yunet_row_count(&tensor.shape, columns)? != rows
+        || rows.checked_mul(columns) != Some(tensor.values.len())
+    {
+        return Err(DetectError::InvalidArgument(format!(
+            "YuNet `{name}` tensor must contain {rows} rows of {columns} values"
+        )));
+    }
+    Ok(tensor)
 }
 
 fn decode_yunet_split_tensors(
@@ -2161,6 +2311,149 @@ mod tests {
                 .repo_id_value(),
             Some("opencv/face_detection_yunet")
         );
+    }
+
+    #[test]
+    fn yunet_preprocessing_sends_unscaled_bgr_channels_to_the_runner() {
+        struct BgrRunner;
+        impl OnnxFaceDetectionRunner for BgrRunner {
+            fn run_face_detection(
+                &mut self,
+                input: &ImageModelTensor,
+            ) -> Result<OnnxFaceDetectionOutput> {
+                assert_eq!((input.width, input.height, input.channels), (32, 32, 3));
+                assert_eq!(input.values[0], 30.0);
+                assert_eq!(input.values[32 * 32], 20.0);
+                assert_eq!(input.values[2 * 32 * 32], 10.0);
+                Ok(yunet_2023_output())
+            }
+        }
+        let image = OwnedImage::new_rgb(1, 1, vec![10, 20, 30]).unwrap();
+        let mut detector = OnnxFaceDetector::with_options(yunet_2023_options(), BgrRunner).unwrap();
+        assert!(detector.detect_faces(&image.as_view()).unwrap().is_empty());
+    }
+
+    #[cfg(feature = "onnx")]
+    #[test]
+    fn yunet_preprocessing_respects_fixed_model_input_dimensions() {
+        use runtime_onnx::{OnnxDimension, OnnxIoInfo, OnnxTensorElementType};
+
+        let mut preprocessing = OnnxFaceDetectionOptions::default().preprocessing;
+        let mut input = OnnxIoInfo {
+            name: "input".to_string(),
+            element_type: Some(OnnxTensorElementType::F32),
+            dimensions: [1, 3, 640, 640].map(OnnxDimension::Fixed).to_vec(),
+        };
+        configure_face_model_input(&mut preprocessing, &input).unwrap();
+        assert_eq!(
+            (preprocessing.input_width, preprocessing.input_height),
+            (640, 640)
+        );
+        input.dimensions[2] = OnnxDimension::Fixed(0);
+        assert!(configure_face_model_input(&mut preprocessing, &input).is_err());
+    }
+
+    #[test]
+    fn yunet_2023_runner_decodes_scores_boxes_landmarks_and_nms() {
+        let mut output = yunet_2023_output();
+        // Two overlapping predictions across strides; only the higher score survives.
+        output.tensors.get_mut("cls_8").unwrap().values[5] = 0.81;
+        output.tensors.get_mut("obj_8").unwrap().values[5] = 1.0;
+        output.tensors.get_mut("bbox_8").unwrap().values[20..24]
+            .copy_from_slice(&[1.0, 1.0, 2.0_f32.ln(), 2.0_f32.ln()]);
+        output.tensors.get_mut("kps_8").unwrap().values[50..60]
+            .copy_from_slice(&[0.125, 0.25, 1.0, 0.0, 0.5, 0.5, 0.0, 1.0, 1.0, 1.0]);
+        output.tensors.get_mut("cls_16").unwrap().values[0] = 0.64;
+        output.tensors.get_mut("obj_16").unwrap().values[0] = 1.0;
+        output.tensors.get_mut("bbox_16").unwrap().values[..4]
+            .copy_from_slice(&[1.0, 1.0, 0.0, 0.0]);
+        // The coarsest head contributes a distinct, lower-confidence full-image box.
+        output.tensors.get_mut("cls_32").unwrap().values[0] = 0.49;
+        output.tensors.get_mut("obj_32").unwrap().values[0] = 1.0;
+        output.tensors.get_mut("bbox_32").unwrap().values[..4]
+            .copy_from_slice(&[0.5, 0.5, 0.0, 0.0]);
+
+        let mut detector = OnnxFaceDetector::with_options(
+            yunet_2023_options(),
+            StubFaceRunner { output },
+        )
+        .unwrap();
+        let pixels = vec![0_u8; 64 * 96 * 3];
+        let image = ImageView::packed(64, 96, ImagePixelFormat::Rgb24, &pixels).unwrap();
+        let detections = detector.detect_faces(&image).unwrap();
+        assert_eq!(detections.len(), 2);
+        assert!((detections[0].confidence - 0.9).abs() < 0.0001);
+        assert!((detections[1].confidence - 0.7).abs() < 0.0001);
+        assert_eq!(detections[0].bbox, FaceBox::new(0.25, 0.25, 0.5, 0.5).unwrap());
+        assert_eq!(detections[1].bbox, FaceBox::new(0.0, 0.0, 1.0, 1.0).unwrap());
+        assert_eq!(
+            detections[0].landmarks.as_ref().unwrap().points[0],
+            [0.28125, 0.3125]
+        );
+    }
+
+    #[test]
+    fn yunet_2023_landmarks_near_origin_are_pixels_not_normalized_coordinates() {
+        let mut output = yunet_2023_output();
+        output.tensors.get_mut("cls_8").unwrap().values[0] = 1.0;
+        output.tensors.get_mut("obj_8").unwrap().values[0] = 1.0;
+        output.tensors.get_mut("bbox_8").unwrap().values[..4]
+            .copy_from_slice(&[0.5, 0.5, 0.0, 0.0]);
+        output.tensors.get_mut("kps_8").unwrap().values[..10].fill(0.125);
+        let detections =
+            decode_yunet_face_detections(&output, &yunet_2023_options(), (32, 32)).unwrap();
+        assert_eq!(
+            detections[0].landmarks.as_ref().unwrap().points[0],
+            [1.0 / 32.0; 2]
+        );
+    }
+
+    #[test]
+    fn yunet_2023_rejects_missing_heads_and_malformed_buffers() {
+        let options = yunet_2023_options();
+        let mut missing = yunet_2023_output();
+        missing.tensors.remove("kps_16");
+        assert!(decode_yunet_face_detections(&missing, &options, (32, 32))
+            .unwrap_err()
+            .to_string()
+            .contains("kps_16"));
+
+        let mut truncated = yunet_2023_output();
+        truncated.tensors.get_mut("bbox_8").unwrap().values.pop();
+        assert!(decode_yunet_face_detections(&truncated, &options, (32, 32)).is_err());
+
+        let mut wrong_grid = yunet_2023_output();
+        wrong_grid.tensors.insert(
+            "cls_8".to_string(),
+            f32_tensor(vec![1, 15, 1], vec![0.0; 15]),
+        );
+        assert!(decode_yunet_face_detections(&wrong_grid, &options, (32, 32)).is_err());
+    }
+
+    fn yunet_2023_options() -> OnnxFaceDetectionOptions {
+        OnnxFaceDetectionOptions {
+            preprocessing: ImageModelPreprocessing {
+                input_width: 32,
+                input_height: 32,
+                ..OnnxFaceDetectionOptions::default().preprocessing
+            },
+            score_threshold: 0.5,
+            ..OnnxFaceDetectionOptions::default()
+        }
+    }
+
+    fn yunet_2023_output() -> OnnxFaceDetectionOutput {
+        let mut tensors = BTreeMap::new();
+        for stride in [8, 16, 32] {
+            let rows = (32 / stride) * (32 / stride);
+            for (name, columns) in [("cls", 1), ("obj", 1), ("bbox", 4), ("kps", 10)] {
+                tensors.insert(
+                    format!("{name}_{stride}"),
+                    f32_tensor(vec![1, rows, columns], vec![0.0; rows * columns]),
+                );
+            }
+        }
+        OnnxFaceDetectionOutput { tensors }
     }
 
     #[test]

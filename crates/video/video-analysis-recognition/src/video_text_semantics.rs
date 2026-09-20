@@ -772,7 +772,7 @@ fn semantic_evidence(
 fn infer_scene_index(scenes: &[Scene], frame: u64) -> Option<u64> {
     scenes
         .iter()
-        .position(|scene| frame >= scene.start.frame_index && frame <= scene.end.frame_index)
+        .position(|scene| frame >= scene.start.frame_index && frame < scene.end.frame_index)
         .map(|index| index as u64)
 }
 
@@ -1138,5 +1138,24 @@ mod tests {
             analysis.relations[0].predicate.as_str(),
             "visual-analysis:relation:appears-in-scene"
         );
+    }
+
+    #[test]
+    fn scene_cut_belongs_to_the_new_scene_and_keeps_its_text_track_together() {
+        let scenes = [scene(0, 100), scene(100, 200)];
+        let region = BoundingBox::new(100, 200, 300, 100).unwrap();
+        let observations = [
+            text_observation("STORE", 100, None, region),
+            text_observation("STORE", 101, None, region),
+        ];
+        let analysis = analyze_video_text_semantics(context(&scenes, 10.0), &observations).unwrap();
+        assert_eq!(analysis.tracks.len(), 1);
+        assert_eq!(analysis.tracks[0].sample_count, 2);
+        assert_eq!(analysis.tracks[0].scene_indices, vec![1]);
+
+        let outside = [text_observation("AFTER", 200, None, region)];
+        let analysis = analyze_video_text_semantics(context(&scenes, 10.0), &outside).unwrap();
+        assert!(analysis.tracks[0].scene_indices.is_empty());
+        assert!(analysis.relations.is_empty());
     }
 }

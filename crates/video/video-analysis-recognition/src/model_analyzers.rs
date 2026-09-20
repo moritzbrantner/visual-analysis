@@ -191,8 +191,8 @@ impl<B: OcrBackend> VideoAnalyzer for OcrVideoAnalyzer<B> {
 
 /// Returns the deterministic representative-frame plan for a scene list.
 ///
-/// Each scene contributes its first, midpoint, and final frame. Duplicate frame
-/// indices are removed while preserving deterministic ascending order.
+/// Scene ends are exclusive. Each non-empty scene contributes its first,
+/// midpoint, and final included frame. Duplicate indices are removed.
 #[cfg(feature = "ocr")]
 pub fn representative_scene_frames(scenes: &[Scene]) -> Result<BTreeSet<u64>> {
     if scenes.is_empty() {
@@ -205,14 +205,15 @@ pub fn representative_scene_frames(scenes: &[Scene]) -> Result<BTreeSet<u64>> {
     for scene in scenes {
         let start = scene.start.frame_index;
         let end = scene.end.frame_index;
-        if end < start {
+        if end <= start {
             return Err(video_analysis_core::DetectError::InvalidArgument(format!(
-                "scene end frame {end} precedes start frame {start}"
+                "exclusive scene end frame {end} must follow start frame {start}"
             )));
         }
+        let last = end - 1;
         frames.insert(start);
-        frames.insert(start + (end - start) / 2);
-        frames.insert(end);
+        frames.insert(start + (last - start) / 2);
+        frames.insert(last);
     }
     Ok(frames)
 }
@@ -540,7 +541,7 @@ mod tests {
 
     #[test]
     fn scene_aware_ocr_samples_edges_and_midpoints_then_tracks_per_scene() -> Result<()> {
-        let scenes = vec![scene(0, 4), scene(5, 8)];
+        let scenes = vec![scene(0, 5), scene(5, 9)];
         assert_eq!(
             representative_scene_frames(&scenes)?
                 .into_iter()

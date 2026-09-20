@@ -11,6 +11,7 @@ Object and face detection built from native ONNX inference, image segmentation m
 
 - `image.detection.detect` runs the `Xenova/detr-resnet-50` ONNX preset against an in-memory image payload or `imagePath`.
 - `image.detection.detectFaces` runs the OpenCV YuNet ONNX face detector against the same input contract. Face results expose pixel `region` values plus a `normalizedRegion` and normalized landmarks so downstream video/corpus adapters can preserve an explicit coordinate space.
+- The YuNet 2023 preset uses unscaled BGR input and the model's declared fixed input dimensions. Its `cls`, `obj`, `bbox`, and `kps` heads are decoded at strides 8, 16, and 32 before score filtering and non-maximum suppression. Legacy single-tensor and `loc`/`conf`/`iou` decoding remain supported for existing callers.
 - Model downloads remain opt-in through `autoDownload`; model bundles default to `.model-runtime`.
 - `image.detection.colorBlob` keeps the deterministic in-memory red-blob detector as a lightweight object-detection fallback.
 - Debug operations `image.detection.models`, `image.detection.boxSummary`, and `describe` inspect model metadata and imported boxes without running a detector.
