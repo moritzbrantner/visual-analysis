@@ -1402,6 +1402,41 @@ mod tests {
     }
 
     #[test]
+    fn sface_similarity_transform_recovers_rotation_scale_and_translation() {
+        let angle = 17_f64.to_radians();
+        let (sin, cos) = angle.sin_cos();
+        let scale = 1.4;
+        let translate_x = 50.0;
+        let translate_y = 10.0;
+        let source = SFACE_REFERENCE_LANDMARKS
+            .iter()
+            .map(|point| {
+                [
+                    scale * (cos * point[0] - sin * point[1]) + translate_x,
+                    scale * (sin * point[0] + cos * point[1]) + translate_y,
+                ]
+            })
+            .collect::<Vec<_>>();
+        let landmarks = FaceLandmarks::new(
+            source
+                .iter()
+                .map(|point| [(point[0] / 256.0) as f32, (point[1] / 256.0) as f32])
+                .collect(),
+        )
+        .unwrap();
+        let transform = sface_similarity_transform(&landmarks, 256, 256, 112, 112).unwrap();
+
+        for (source, expected) in source.iter().zip(SFACE_REFERENCE_LANDMARKS.iter()) {
+            let actual = [
+                transform.a * source[0] - transform.b * source[1] + transform.tx,
+                transform.b * source[0] + transform.a * source[1] + transform.ty,
+            ];
+            assert!((actual[0] - expected[0]).abs() < 1.0e-4);
+            assert!((actual[1] - expected[1]).abs() < 1.0e-4);
+        }
+    }
+
+    #[test]
     fn sface_alignment_inverts_scale_and_translation() {
         let image = coordinate_image(224, 224);
         let landmarks = sface_landmarks_for_transform(224, 224, 2.0, 10.0, 12.0);
