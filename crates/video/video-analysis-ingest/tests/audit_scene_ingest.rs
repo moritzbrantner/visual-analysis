@@ -194,6 +194,30 @@ fn padded_bgr_and_nonzero_source_indices_preserve_cut_positions_and_scores() {
     );
 }
 #[test]
+fn source_without_declared_frame_rate_uses_frame_timebase() {
+    let mut source = Source::new(4);
+    source.info.video.as_mut().unwrap().frame_rate = None;
+    source.offset = 100;
+
+    let result = detect_content_scenes(&mut source, 20.0, 1).unwrap();
+
+    assert_eq!(source.reads, 5);
+    assert_eq!(result.frames_processed, 4);
+    assert_eq!(
+        result
+            .cuts
+            .iter()
+            .map(|cut| cut.position.frame_index)
+            .collect::<Vec<_>>(),
+        vec![102]
+    );
+    assert_eq!(
+        result.cuts[0].position.timestamp,
+        FramePosition::from_frame_index(102, Rational64::new(30, 1)).timestamp
+    );
+}
+
+#[test]
 fn empty_and_invalid_inputs_do_not_invent_scenes_or_decode() {
     assert!(detect_content_scenes(&mut Source::new(0), 20.0, 1)
         .unwrap()
