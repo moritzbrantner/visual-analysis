@@ -5,10 +5,11 @@ pub mod surface;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use image_analysis_core::ImageView;
-use image_analysis_detection::FaceDetection;
+use image_analysis_core::{ImageView, OwnedImage};
+use image_analysis_detection::{FaceDetection, FaceLandmarks};
 use image_analysis_processing::{
-    crop_image_rect, image_model_preprocessing_from_config, preprocess_image_for_model,
+    crop_image_rect, image_model_preprocessing_from_config, image_to_model_tensor,
+    preprocess_image_for_model,
     validate_image_model_preprocessing, ChannelOrder, ImageModelPreprocessing, ImageModelTensor,
 };
 use math_geometry_2d::RectU32;
@@ -422,6 +423,177 @@ impl Default for OnnxFaceEmbeddingOptions {
     }
 }
 
+const SFACE_REFERENCE_SIZE: f64 = 112.0;
+const SFACE_REFERENCE_LANDMARKS: [[f64; 2]; 5] = [
+    [38.2946, 51.6963],
+    [73.5318, 51.5014],
+    [56.0252, 71.7366],
+    [41.5493, 92.3655],
+    [70.7299, 92.2041],
+];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SimilarityTransform {
+    a: f64,
+    b: f64,
+    tx: f64,
+    ty: f64,
+}
+
+/// Aligns a YuNet-style five-landmark face to the canonical OpenCV SFace frame.
+///
+/// OpenCV's SFace reference path aligns the five normalized facial landmarks
+/// before feature extraction. This keeps the model input stable under modest
+/// translation, scale, and in-plane rotation instead of stretching a raw
+/// bounding-box crop into the 112x112 recognition input.
+pub fn align_face_for_sface(
+    image: &ImageView<'_>,
+    landmarks: &FaceLandmarks,
+    output_width: u32,
+    output_height: u32,
+) -> Result<OwnedImage> {
+    image.validate()?;
+    if output_width == 0 || output_height == 0 {
+        return Err(DetectError::InvalidDimensions {
+            width: output_width,
+            height: output_height,
+        });
+    }
+    let transform =
+        sface_similarity_transform(landmarks, image.width, image.height, output_width, output_height)?;
+    warp_similarity_rgb(image, transform, output_width, output_height)
+}
+
+fn sface_similarity_transform(
+    landmarks: &FaceLandmarks,
+    image_width: u32,
+    image_height: u32,
+    output_width: u32,
+    output_height: u32,
+) -> Result<SimilarityTransform> {
+    if landmarks.points.len() != 5 {
+        return Err(DetectError::InvalidArgument(format!(
+            "SFace alignment requires exactly five landmarks, got {}",
+            landmarks.points.len()
+        )));
+    }
+    let source = landmarks
+        .points
+        .iter()
+        .map(|point| {
+            [
+                f64::from(point[0]) * f64::from(image_width),
+                f64::from(point[1]) * f64::from(image_height),
+            ]
+        })
+        .collect::<Vec<_>>();
+    if source.iter().flatten().any(|value| !value.is_finite()) {
+        return Err(DetectError::InvalidArgument(
+            "SFace alignment landmarks must be finite".to_string(),
+        ));
+    }
+
+    let scale_x = f64::from(output_width) / SFACE_REFERENCE_SIZE;
+    let scale_y = f64::from(output_height) / SFACE_REFERENCE_SIZE;
+    let destination = SFACE_REFERENCE_LANDMARKS.map(|point| {
+        [point[0] * scale_x, point[1] * scale_y]
+    });
+    let source_mean = [
+        source.iter().map(|point| point[0]).sum::<f64>() / 5.0,
+        source.iter().map(|point| point[1]).sum::<f64>() / 5.0,
+    ];
+    let destination_mean = [
+        destination.iter().map(|point| point[0]).sum::<f64>() / 5.0,
+        destination.iter().map(|point| point[1]).sum::<f64>() / 5.0,
+    ];
+
+    let mut denominator = 0.0;
+    let mut a_numerator = 0.0;
+    let mut b_numerator = 0.0;
+    for (source, destination) in source.iter().zip(destination.iter()) {
+        let sx = source[0] - source_mean[0];
+        let sy = source[1] - source_mean[1];
+        let dx = destination[0] - destination_mean[0];
+        let dy = destination[1] - destination_mean[1];
+        denominator += sx * sx + sy * sy;
+        a_numerator += sx * dx + sy * dy;
+        b_numerator += sx * dy - sy * dx;
+    }
+    if !denominator.is_finite() || denominator <= f64::EPSILON {
+        return Err(DetectError::InvalidArgument(
+            "SFace alignment landmarks are degenerate".to_string(),
+        ));
+    }
+    let a = a_numerator / denominator;
+    let b = b_numerator / denominator;
+    let tx = destination_mean[0] - a * source_mean[0] + b * source_mean[1];
+    let ty = destination_mean[1] - b * source_mean[0] - a * source_mean[1];
+    if [a, b, tx, ty].iter().any(|value| !value.is_finite()) || a * a + b * b <= f64::EPSILON {
+        return Err(DetectError::InvalidArgument(
+            "SFace alignment transform is not invertible".to_string(),
+        ));
+    }
+    Ok(SimilarityTransform { a, b, tx, ty })
+}
+
+fn warp_similarity_rgb(
+    image: &ImageView<'_>,
+    transform: SimilarityTransform,
+    output_width: u32,
+    output_height: u32,
+) -> Result<OwnedImage> {
+    let denominator = transform.a * transform.a + transform.b * transform.b;
+    if !denominator.is_finite() || denominator <= f64::EPSILON {
+        return Err(DetectError::InvalidArgument(
+            "SFace alignment transform is not invertible".to_string(),
+        ));
+    }
+
+    let mut data = vec![0_u8; output_width as usize * output_height as usize * 3];
+    for y in 0..output_height {
+        for x in 0..output_width {
+            let dx = f64::from(x) - transform.tx;
+            let dy = f64::from(y) - transform.ty;
+            let source_x = (transform.a * dx + transform.b * dy) / denominator;
+            let source_y = (-transform.b * dx + transform.a * dy) / denominator;
+            let rgb = bilinear_rgb(image, source_x, source_y);
+            let offset = (y as usize * output_width as usize + x as usize) * 3;
+            data[offset..offset + 3].copy_from_slice(&rgb);
+        }
+    }
+    OwnedImage::new_rgb(output_width, output_height, data)
+}
+
+fn bilinear_rgb(image: &ImageView<'_>, x: f64, y: f64) -> [u8; 3] {
+    let x0 = x.floor() as i64;
+    let y0 = y.floor() as i64;
+    let x1 = x0 + 1;
+    let y1 = y0 + 1;
+    let wx = x - x0 as f64;
+    let wy = y - y0 as f64;
+    let samples = [
+        (x0, y0, (1.0 - wx) * (1.0 - wy)),
+        (x1, y0, wx * (1.0 - wy)),
+        (x0, y1, (1.0 - wx) * wy),
+        (x1, y1, wx * wy),
+    ];
+    let mut result = [0.0_f64; 3];
+    for (sample_x, sample_y, weight) in samples {
+        if sample_x < 0
+            || sample_y < 0
+            || sample_x >= i64::from(image.width)
+            || sample_y >= i64::from(image.height)
+        {
+            continue;
+        }
+        let pixel = image.pixel_rgb(sample_x as u32, sample_y as u32);
+        for channel in 0..3 {
+            result[channel] += f64::from(pixel[channel]) * weight;
+        }
+    }
+    result.map(|value| value.round().clamp(0.0, 255.0) as u8)
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct OnnxEmbeddingBundleInfo {
     config_path: Option<PathBuf>,
@@ -601,21 +773,42 @@ impl<R: OnnxFaceEmbeddingRunner> FaceEmbedderBackend for OnnxFaceEmbedder<R> {
         image: &ImageView<'_>,
         detection: Option<&FaceDetection>,
     ) -> Result<FaceEmbedding> {
+        image.validate()?;
         let cropped;
-        let source = if let Some(detection) = detection {
-            let region = face_detection_rect(detection, image)?;
-            cropped = crop_image_rect(image, region)?;
-            cropped.as_view()
+        let aligned;
+        let (input, preprocessing_kind) = if let Some(detection) = detection {
+            if let Some(landmarks) = detection.landmarks.as_ref() {
+                aligned = align_face_for_sface(
+                    image,
+                    landmarks,
+                    self.options.preprocessing.input_width,
+                    self.options.preprocessing.input_height,
+                )?;
+                (
+                    image_to_model_tensor(&aligned.as_view(), &self.options.preprocessing)?,
+                    "sface-five-point-alignment",
+                )
+            } else {
+                let region = face_detection_rect(detection, image)?;
+                cropped = crop_image_rect(image, region)?;
+                (
+                    preprocess_image_for_model(&cropped.as_view(), &self.options.preprocessing)?,
+                    "bounding-box-crop",
+                )
+            }
         } else {
-            *image
+            (
+                preprocess_image_for_model(image, &self.options.preprocessing)?,
+                "full-image",
+            )
         };
-        let input = preprocess_image_for_model(&source, &self.options.preprocessing)?;
         let output = self.runner.run_face_embedding(&input)?;
         let mut vector = select_embedding_vector(&output, self.options.expected_vector_size)?;
         if self.options.normalize {
             normalize_vector(&mut vector);
         }
-        let mut embedding = FaceEmbedding::new(vector)?;
+        let mut embedding = FaceEmbedding::new(vector)?
+            .attribute("facePreprocessing", preprocessing_kind);
         if let Some(detection) = detection {
             embedding = embedding.region(face_detection_box(detection, image)?);
         }
@@ -963,7 +1156,7 @@ fn runtime_onnx_error(error: runtime_onnx::OnnxRuntimeError) -> DetectError {
 mod tests {
     use super::*;
     use image_analysis_core::{ImagePixelFormat, OwnedImage};
-    use image_analysis_detection::FaceBox;
+    use image_analysis_detection::{FaceBox, FaceLandmarks};
     use model_runtime::{ModelBundle, ModelBundleFile, ModelBundleManifest};
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -1018,6 +1211,41 @@ mod tests {
 
     fn image() -> OwnedImage {
         OwnedImage::new(4, 4, ImagePixelFormat::Rgb24, vec![128; 4 * 4 * 3], 4 * 3).unwrap()
+    }
+
+    fn coordinate_image(width: u32, height: u32) -> OwnedImage {
+        let mut data = Vec::with_capacity(width as usize * height as usize * 3);
+        for y in 0..height {
+            for x in 0..width {
+                data.extend_from_slice(&[
+                    x.min(255) as u8,
+                    y.min(255) as u8,
+                    ((x + y) / 2).min(255) as u8,
+                ]);
+            }
+        }
+        OwnedImage::new_rgb(width, height, data).unwrap()
+    }
+
+    fn sface_landmarks_for_transform(
+        image_width: u32,
+        image_height: u32,
+        scale: f64,
+        translate_x: f64,
+        translate_y: f64,
+    ) -> FaceLandmarks {
+        FaceLandmarks::new(
+            SFACE_REFERENCE_LANDMARKS
+                .iter()
+                .map(|point| {
+                    [
+                        ((point[0] * scale + translate_x) / f64::from(image_width)) as f32,
+                        ((point[1] * scale + translate_y) / f64::from(image_height)) as f32,
+                    ]
+                })
+                .collect(),
+        )
+        .unwrap()
     }
 
     fn test_bundle(
@@ -1166,6 +1394,31 @@ mod tests {
     }
 
     #[test]
+    fn sface_alignment_preserves_canonical_landmark_frame() {
+        let image = coordinate_image(112, 112);
+        let landmarks = sface_landmarks_for_transform(112, 112, 1.0, 0.0, 0.0);
+        let aligned = align_face_for_sface(&image.as_view(), &landmarks, 112, 112).unwrap();
+        assert_eq!(aligned, image);
+    }
+
+    #[test]
+    fn sface_alignment_inverts_scale_and_translation() {
+        let image = coordinate_image(224, 224);
+        let landmarks = sface_landmarks_for_transform(224, 224, 2.0, 10.0, 12.0);
+        let aligned = align_face_for_sface(&image.as_view(), &landmarks, 112, 112).unwrap();
+        assert_eq!(aligned.as_view().pixel_rgb(0, 0), [10, 12, 11]);
+        assert_eq!(aligned.as_view().pixel_rgb(56, 72), [122, 156, 139]);
+    }
+
+    #[test]
+    fn sface_alignment_requires_exactly_five_landmarks() {
+        let image = coordinate_image(112, 112);
+        let landmarks = FaceLandmarks::new(vec![[0.25, 0.25], [0.75, 0.25]]).unwrap();
+        let error = align_face_for_sface(&image.as_view(), &landmarks, 112, 112).unwrap_err();
+        assert!(error.to_string().contains("exactly five landmarks"));
+    }
+
+    #[test]
     fn face_embedder_crops_detection_region_before_preprocessing() {
         let options = OnnxFaceEmbeddingOptions {
             preprocessing: ImageModelPreprocessing {
@@ -1193,6 +1446,54 @@ mod tests {
             Some(BoundingBox::new(1, 1, 2, 2).unwrap())
         );
         assert_eq!(embedding.vector, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn face_embedder_uses_five_point_alignment_when_landmarks_are_present() {
+        #[derive(Debug)]
+        struct InspectRunner {
+            first_rgb: Rc<RefCell<Option<[f32; 3]>>>,
+        }
+        impl OnnxFaceEmbeddingRunner for InspectRunner {
+            fn run_face_embedding(
+                &mut self,
+                input: &ImageModelTensor,
+            ) -> Result<Vec<runtime_onnx::OnnxF32Tensor>> {
+                let plane = input.width as usize * input.height as usize;
+                *self.first_rgb.borrow_mut() = Some([
+                    input.values[0],
+                    input.values[plane],
+                    input.values[2 * plane],
+                ]);
+                Ok(vec![tensor(vec![1.0, 2.0])])
+            }
+        }
+
+        let first_rgb = Rc::new(RefCell::new(None));
+        let runner = InspectRunner {
+            first_rgb: Rc::clone(&first_rgb),
+        };
+        let options = OnnxFaceEmbeddingOptions {
+            normalize: false,
+            ..OnnxFaceEmbeddingOptions::default()
+        };
+        let mut embedder = OnnxFaceEmbedder::with_options(options, runner).unwrap();
+        let detection = FaceDetection::new(
+            FaceBox::new(0.05, 0.05, 0.85, 0.9).unwrap(),
+            0.99,
+        )
+        .unwrap()
+        .landmarks(sface_landmarks_for_transform(224, 224, 2.0, 10.0, 12.0));
+
+        let embedding = embedder
+            .embed_face(&coordinate_image(224, 224).as_view(), Some(&detection))
+            .unwrap();
+
+        assert_eq!(*first_rgb.borrow(), Some([10.0, 12.0, 11.0]));
+        assert_eq!(
+            embedding.attributes["facePreprocessing"],
+            "sface-five-point-alignment"
+        );
     }
 
     #[test]
