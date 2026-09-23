@@ -1,15 +1,14 @@
-name: Audit native baseline
+name: Audit offline Rust workspace
 on:
   push:
     branches: [audit/validation-workspace]
 permissions:
   contents: read
 jobs:
-  baseline:
+  workspace:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     env:
-      CARGO_TERM_COLOR: never
       CODING_TOOLING_REV: 7f63dade760bfb1020c69d1a0ac7319cbbdf91ab
     steps:
       - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
@@ -40,32 +39,24 @@ jobs:
           key: ${{ runner.os }}-visual-audit-native-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: |
             ${{ runner.os }}-visual-native-onnx-cargo-
-      - name: Native library and integration baseline
+      - name: Fetch exact locked dependencies and toolchain
+        run: cargo fetch --locked
+      - name: Export public sources and compiler, never credentials or build outputs
         shell: bash
         run: |
-          set -o pipefail
-          cargo test --locked -p moenarch-video-analysis-core -p moenarch-video-analysis-ffmpeg -p moenarch-video-analysis-detectors -p moenarch-video-analysis-ingest -p moenarch-video-analysis-recognition --features moenarch-video-analysis-recognition/ocr --lib --tests 2>&1 | tee native-baseline.log
-      - name: Retain exact dependency source for offline review
-        if: always()
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import tarfile
-          from pathlib import Path
-          with tarfile.open('audit-dependency-source.tar.gz', 'w:gz') as archive:
-              for pattern in ('scenedetect-core-*', 'moenarch-text-core-*'):
-                  for path in (Path.home()/'.cargo/registry/src').glob('*/'+pattern):
-                      archive.add(path, arcname=path.name)
-              foundation = Path('../moenarch-foundation')
-              if foundation.exists():
-                  archive.add(foundation, arcname='moenarch-foundation', filter=lambda entry: None if '/.git/' in entry.name or entry.name.endswith('/.git') else entry)
-          PY
+          set -euo pipefail
+          tar --zstd -cf audit-rust-runtime.tar.zst -C "$HOME" \
+            .rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/bin \
+            .rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/lib \
+            .rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/libexec \
+            .cargo/registry
+          tar --zstd -cf audit-foundation.tar.zst -C .. moenarch-foundation
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
         with:
-          name: visual-analysis-native-baseline
+          name: visual-analysis-offline-rust
           path: |
-            native-baseline.log
-            audit-dependency-source.tar.gz
+            audit-rust-runtime.tar.zst
+            audit-foundation.tar.zst
           retention-days: 1
+          compression-level: 0
           if-no-files-found: error
