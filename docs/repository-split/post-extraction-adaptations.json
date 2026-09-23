@@ -24,7 +24,6 @@
     "crates/image/image-analysis-segmentation/README.md",
     "crates/image/image-analysis-segmentation/src/lib.rs",
     "crates/image/image-analysis-segmentation/src/surface.rs",
-    "crates/video/video-analysis-core/src/lib.rs",
     "crates/video/video-analysis-detectors/benches/scene_detectors.rs",
     "crates/video/video-analysis-detectors/examples/detector_benchmark.rs",
     "crates/video/video-analysis-detectors/examples/scene_dataset_eval.rs",
