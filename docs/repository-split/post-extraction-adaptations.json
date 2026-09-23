@@ -16,6 +16,7 @@
     "crates/image/image-analysis-embeddings/README.md",
     "crates/image/image-analysis-embeddings/src/lib.rs",
     "crates/image/image-analysis-embeddings/src/surface.rs",
+    "crates/image/image-analysis-embeddings/tests/external_onnx_smoke.rs",
     "crates/image/image-analysis-ocr-cli/Cargo.toml",
     "crates/image/image-analysis-ocr-server/Cargo.toml",
     "crates/image/image-analysis-ocr/README.md",
