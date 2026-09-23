@@ -88,23 +88,36 @@ where
         ));
     }
 
-    let rate = source
+    let declared_rate = source
         .source_info()
         .video
         .as_ref()
         .and_then(|video| video.frame_rate)
-        .filter(|rate| *rate.numer() > 0 && *rate.denom() > 0)
-        .ok_or_else(|| {
-            DetectError::InvalidArgument(
-                "content detection requires a positive source frame rate".into(),
-            )
-        })?;
+        .filter(|rate| *rate.numer() > 0 && *rate.denom() > 0);
+    let (rate, pending_frame) = if let Some(rate) = declared_rate {
+        (rate, None)
+    } else {
+        let Some(frame) = source.next_video_frame()? else {
+            return Ok(DetectionResult::default());
+        };
+        let timebase = frame.position.timestamp.timebase;
+        if timebase.num <= 0 || timebase.den <= 0 {
+            return Err(DetectError::InvalidArgument(
+                "content detection requires a positive source frame rate or frame timebase".into(),
+            ));
+        }
+        (
+            Rational64::new(i64::from(timebase.den), i64::from(timebase.num)),
+            Some(frame),
+        )
+    };
     let mut positions = Vec::new();
     let analysis = analyze_content_source(
         PositionedSource {
             source,
             positions: &mut positions,
             rate,
+            pending_frame,
         },
         ContentDetectorConfig {
             threshold: f64::from(threshold),
@@ -150,13 +163,19 @@ struct PositionedSource<'a, S> {
     source: &'a mut S,
     positions: &'a mut Vec<FramePosition>,
     rate: Rational64,
+    pending_frame: Option<OwnedVideoFrame>,
 }
 impl<S: VideoFrameSource> VideoSource for PositionedSource<'_, S> {
     fn frame_rate(&self) -> Rational64 {
         self.rate
     }
     fn next_frame(&mut self) -> video_analysis_core::Result<Option<OwnedVideoFrame>> {
-        let Some(mut frame) = self.source.next_video_frame()? else {
+        let next = if self.pending_frame.is_some() {
+            self.pending_frame.take()
+        } else {
+            self.source.next_video_frame()?
+        };
+        let Some(mut frame) = next else {
             return Ok(None);
         };
         if self
