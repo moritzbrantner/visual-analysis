@@ -1,0 +1,26 @@
+name: Audit workspace snapshot
+on:
+  push:
+    branches: [audit/validation-workspace]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          persist-credentials: false
+      - name: Export tracked source only
+        run: |
+          git archive --format=tar.gz --output=visual-analysis-source.tar.gz HEAD
+          git rev-parse HEAD > source-commit.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: visual-analysis-audit-source
+          path: |
+            visual-analysis-source.tar.gz
+            source-commit.txt
+          retention-days: 1
+          if-no-files-found: error
