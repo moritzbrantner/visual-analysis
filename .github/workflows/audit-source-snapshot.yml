@@ -1,0 +1,53 @@
+name: Transplant reviewed audit repairs
+on:
+  push:
+    branches: [audit/validation-workspace]
+    paths: [.github/workflows/audit-source-snapshot.yml]
+permissions:
+  contents: write
+jobs:
+  transplant:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+      - name: Verify and apply only the reviewed patch to its exact base
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, bz2, hashlib
+          from pathlib import Path
+          parts = [Path(f'.audit-transfer/part{i}.b64').read_text().strip() for i in range(5)]
+          data = bz2.decompress(base64.b64decode(''.join(parts), validate=True))
+          assert hashlib.sha256(data).hexdigest() == '8b25eb45fdec21a150d4cbb0178664912920d5602b806dbb1245aae2d57c7710', 'transferred patch identity mismatch'
+          Path('/tmp/reviewed-audit.json').write_bytes(data)
+          PY
+          git fetch --depth=1 origin 281d4c553beed5c151e5a7e66a41309631ae6fff
+          git switch -c fix/audit-regression-fences 281d4c553beed5c151e5a7e66a41309631ae6fff
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/reviewed-audit.json').read_text())
+          assert data['base'] == '281d4c553beed5c151e5a7e66a41309631ae6fff'
+          for entry in data['files']:
+              path = Path(entry['path'])
+              assert not path.is_absolute() and '..' not in path.parts
+              assert path.parts[0] in {'crates','site','tests','docs','scripts','.gitignore','AGENTS.md','Cargo.lock'}
+              old = path.read_bytes() if path.exists() else b''
+              assert hashlib.sha256(old).hexdigest() == entry['before'], f'base mismatch: {path}'
+              lines = old.decode().splitlines(True)
+              for start, end, text in reversed(entry['edits']):
+                  lines[start:end] = [text]
+              new = ''.join(lines).encode()
+              assert hashlib.sha256(new).hexdigest() == entry['after'], f'result mismatch: {path}'
+              path.parent.mkdir(parents=True, exist_ok=True)
+              path.write_bytes(new)
+              path.chmod(0o755 if entry['executable'] else 0o644)
+          PY
+          git add .
+          git diff --cached --check
+          git config user.name moritzbrantner
+          git config user.email 31051084+moritzbrantner@users.noreply.github.com
+          git commit -m 'fix: fence visual audit regressions with native and browser evidence'
+          git push origin HEAD:refs/heads/fix/audit-regression-fences
