@@ -192,7 +192,9 @@ impl<B: OcrBackend> VideoAnalyzer for OcrVideoAnalyzer<B> {
 /// Returns the deterministic representative-frame plan for a scene list.
 ///
 /// Scene ends are exclusive. Each non-empty scene contributes its first,
-/// midpoint, and final included frame. Duplicate indices are removed.
+/// midpoint, and final included frame. Long scenes add samples at no more than
+/// half the tracker's frame/time gap (assuming uniform spacing within a scene).
+/// Duplicate indices are removed. Plans above 10,000 targets fail explicitly.
 #[cfg(feature = "ocr")]
 pub fn representative_scene_frames(scenes: &[Scene]) -> Result<BTreeSet<u64>> {
     if scenes.is_empty() {
@@ -201,6 +203,8 @@ pub fn representative_scene_frames(scenes: &[Scene]) -> Result<BTreeSet<u64>> {
         ));
     }
 
+    const MAX_SAMPLES: usize = 10_000;
+    use crate::video_text_semantics::{MAX_FALLBACK_GAP_FRAMES, MAX_FALLBACK_GAP_SECONDS};
     let mut frames = BTreeSet::new();
     for scene in scenes {
         let start = scene.start.frame_index;
@@ -211,9 +215,33 @@ pub fn representative_scene_frames(scenes: &[Scene]) -> Result<BTreeSet<u64>> {
             )));
         }
         let last = end - 1;
+        let duration = scene.end.timestamp.seconds() - scene.start.timestamp.seconds();
+        let frame_step = MAX_FALLBACK_GAP_FRAMES / 2;
+        let step = if duration.is_finite() && duration > 0.0 {
+            (((end - start) as f64 * (MAX_FALLBACK_GAP_SECONDS / 2.0) / duration).floor() as u64)
+                .clamp(1, frame_step)
+        } else {
+            frame_step
+        };
+        // Check before iterating: malformed or huge intervals must not make the
+        // sampling plan itself an unbounded allocation/work operation.
+        let periodic_count = (last - start) / step + 1;
+        if periodic_count > MAX_SAMPLES as u64 {
+            return Err(video_analysis_core::DetectError::InvalidArgument(
+                "scene OCR sampling exceeds 10000 targets".into(),
+            ));
+        }
         frames.insert(start);
         frames.insert(start + (last - start) / 2);
         frames.insert(last);
+        for index in 0..periodic_count {
+            frames.insert(start + index * step);
+        }
+        if frames.len() > MAX_SAMPLES {
+            return Err(video_analysis_core::DetectError::InvalidArgument(
+                "scene OCR sampling exceeds 10000 targets".into(),
+            ));
+        }
     }
     Ok(frames)
 }
@@ -303,9 +331,7 @@ pub fn ocr_document_observations(analyzer: &str, document: &OcrDocument) -> Vec<
                 block.region,
                 block.confidence,
                 document,
-                "block",
-                block_index,
-                None,
+                ("block", block_index, None),
             ) {
                 observations.push(observation);
             }
@@ -319,9 +345,7 @@ pub fn ocr_document_observations(analyzer: &str, document: &OcrDocument) -> Vec<
                 line.region.or(block.region),
                 line.confidence.or(block.confidence),
                 document,
-                "line",
-                block_index,
-                Some(line_index),
+                ("line", block_index, Some(line_index)),
             ) {
                 observations.push(observation);
             }
@@ -335,9 +359,7 @@ pub fn ocr_document_observations(analyzer: &str, document: &OcrDocument) -> Vec<
             None,
             document.confidence,
             document,
-            "document",
-            0,
-            None,
+            ("document", 0, None),
         ) {
             observations.push(observation);
         }
@@ -353,14 +375,13 @@ fn ocr_text_observation(
     region: Option<video_analysis_core::BoundingBox>,
     confidence: Option<OcrConfidence>,
     document: &OcrDocument,
-    granularity: &str,
-    block_index: usize,
-    line_index: Option<usize>,
+    location: (&str, usize, Option<usize>),
 ) -> Option<Observation> {
     if text.is_empty() {
         return None;
     }
 
+    let (granularity, block_index, line_index) = location;
     let mut observation = Observation::new(analyzer, ObservationKind::Text)
         .text(text)
         .attribute("ocr.granularity", granularity)
@@ -458,9 +479,7 @@ mod tests {
             _request: &OcrRequest,
         ) -> Result<OcrDocument> {
             let region = BoundingBox::new(1, 1, 2, 1)?;
-            let line = OcrTextLine::new("Five Ways")?
-                .region(region)
-                .confidence(92);
+            let line = OcrTextLine::new("Five Ways")?.region(region).confidence(92);
             let block = OcrTextBlock::paragraph("Five Ways")?.line(line);
             Ok(OcrDocument::new("Five Ways", image.width, image.height)?
                 .language("en")
@@ -497,7 +516,9 @@ mod tests {
     #[test]
     fn video_pipeline_stamps_structured_ocr_observations() -> Result<()> {
         let analyzer = OcrVideoAnalyzer::new("ocr", FixtureOcr);
-        let mut pipeline = VideoAnalysisPipeline::builder().analyzer(analyzer).build()?;
+        let mut pipeline = VideoAnalysisPipeline::builder()
+            .analyzer(analyzer)
+            .build()?;
         let position = FramePosition::from_frame_index(30, Rational64::new(30, 1));
         let pixels = vec![0_u8; 4 * 2 * 3];
         let frame = VideoFrame::rgb24(position, 4, 2, &pixels)?;
@@ -512,7 +533,10 @@ mod tests {
         assert_eq!(observation.score, Some(0.92));
         assert_eq!(observation.region, Some(BoundingBox::new(1, 1, 2, 1)?));
         assert_eq!(
-            observation.attributes.get("ocr.granularity").map(String::as_str),
+            observation
+                .attributes
+                .get("ocr.granularity")
+                .map(String::as_str),
             Some("line")
         );
         assert_eq!(
@@ -557,7 +581,9 @@ mod tests {
             },
             &scenes,
         )?;
-        let mut pipeline = VideoAnalysisPipeline::builder().analyzer(analyzer).build()?;
+        let mut pipeline = VideoAnalysisPipeline::builder()
+            .analyzer(analyzer)
+            .build()?;
         let pixels = vec![0_u8; 2 * 2 * 3];
         for frame_index in 0..=8 {
             let frame = VideoFrame::rgb24(position(frame_index), 2, 2, &pixels)?;
@@ -587,7 +613,9 @@ mod tests {
 
     #[test]
     fn scene_aware_ocr_rejects_missing_scene_plan() {
-        let error = SceneAwareOcrVideoAnalyzer::new("ocr", FixtureOcr, &[]).unwrap_err();
+        let error = SceneAwareOcrVideoAnalyzer::new("ocr", FixtureOcr, &[])
+            .err()
+            .expect("missing scene plan must fail");
         assert!(error.to_string().contains("at least one scene"));
     }
 }

@@ -540,6 +540,13 @@ async function runExample(kind) {
 }
 
 function reset() {
+  elements["preview-image"].hidden = true;
+  elements["preview-image"].removeAttribute("src");
+  elements["preview-video"].pause();
+  elements["preview-video"].hidden = true;
+  elements["preview-video"].removeAttribute("src");
+  if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+  currentObjectUrl = null;
   elements.report.hidden = true;
   elements["loading-panel"].hidden = true;
   elements["input-panel"].hidden = false;

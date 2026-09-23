@@ -4,7 +4,7 @@ use scenedetect_core::{
     ContentDetectionStats, ContentDetectorConfig, DetectionOptions, Frame, FrameIndex, FrameRate,
     FrameSource, SceneList,
 };
-use video_analysis_core::{DetectError, Result, VideoSource};
+use video_analysis_core::{DetectError, PixelFormat, Result, VideoFrame, VideoSource};
 
 /// Canonical scene-analysis outputs derived from one Detection Stats pass.
 #[derive(Debug, Clone, PartialEq)]
@@ -78,16 +78,48 @@ where
             return Ok(None);
         };
 
-        let borrowed = frame.as_frame();
-        let rgb = (0..borrowed.height)
-            .flat_map(|y| (0..borrowed.width).flat_map(move |x| borrowed.pixel_rgb(x, y)))
-            .collect();
-
+        VideoFrame::packed(
+            frame.position,
+            frame.width,
+            frame.height,
+            frame.pixel_format,
+            &frame.data,
+            frame.stride,
+        )
+        .map_err(|error| scenedetect_core::SceneDetectError::FrameSource(error.to_string()))?;
+        let row_bytes = frame.width as usize * 3;
+        let mut rgb = frame.data;
+        if frame.stride != row_bytes {
+            // Repack padded rows in place; no second full-frame allocation.
+            for y in 1..frame.height as usize {
+                rgb.copy_within(
+                    y * frame.stride..y * frame.stride + row_bytes,
+                    y * row_bytes,
+                );
+            }
+        }
+        rgb.truncate(row_bytes * frame.height as usize);
+        if frame.pixel_format == PixelFormat::Bgr24 {
+            for pixel in rgb.chunks_exact_mut(3) {
+                pixel.swap(0, 2);
+            }
+        }
         Ok(Some(Frame {
-            index: FrameIndex(borrowed.position.frame_index),
-            width: borrowed.width,
-            height: borrowed.height,
+            index: FrameIndex(frame.position.frame_index),
+            width: frame.width,
+            height: frame.height,
             rgb,
         }))
     }
+}
+
+/// Executes any canonical detector configuration in one decoded-source pass.
+/// The algorithms and their parameter semantics remain owned by scenedetect-core.
+pub fn detect_source<S: VideoSource>(
+    source: S,
+    config: scenedetect_core::DetectorConfig,
+    options: DetectionOptions,
+) -> Result<scenedetect_core::DetectionResult> {
+    scenedetect_core::detect_scenes(config, VisualFrameSource::new(source), options)
+        .map_err(|error| DetectError::Source(error.to_string()))
 }

@@ -36,3 +36,9 @@ ocr = ["dep:image-analysis-ocr"]
 
 [dev-dependencies]
 num-rational.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "text_regressions"
+harness = false
+required-features = ["ocr"]

@@ -2171,8 +2171,12 @@ dependencies = [
 name = "moenarch-video-analysis-ingest"
 version = "0.1.0"
 dependencies = [
+ "moenarch-image-analysis-core",
+ "moenarch-image-analysis-ocr",
  "moenarch-runtime-core",
  "moenarch-video-analysis-core",
+ "moenarch-video-analysis-detectors",
+ "moenarch-video-analysis-recognition",
  "num-rational",
  "serde_json",
 ]
@@ -2259,6 +2263,7 @@ name = "moenarch-video-analysis-recognition"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "criterion",
  "moenarch-image-analysis-core",
  "moenarch-image-analysis-detection",
  "moenarch-image-analysis-ocr",

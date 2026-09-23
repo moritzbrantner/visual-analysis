@@ -3,6 +3,7 @@ import {
   SAM_MODEL_ID,
   browserVisionCapabilities,
   detectOpenVocabulary,
+  disposeSamImage,
   prepareSamImage,
   segmentSamBox,
   segmentSamPoints,
@@ -115,6 +116,31 @@ let samReady = false;
 let samPoints = [];
 let running = false;
 let lastDetections = [];
+let imageGeneration = 0;
+let activeOperation = null;
+
+function beginOperation() {
+  const operation = { generation: imageGeneration, imageUrl, session: samSession };
+  activeOperation = operation;
+  setBusy(true);
+  return operation;
+}
+
+function isCurrent(operation) {
+  return activeOperation === operation && operation.generation === imageGeneration;
+}
+
+function finishOperation(operation) {
+  if (isCurrent(operation)) {
+    activeOperation = null;
+    setBusy(false);
+  }
+  // A replaced image's embedding is released only after its pending decoder
+  // stops using it. Never dispose the shared model runtime here.
+  if (operation.session && operation.session !== samSession) {
+    disposeSamImage(operation.session);
+  }
+}
 
 function setStatus(message, kind = "") {
   status.textContent = message;
@@ -155,16 +181,16 @@ function alignOverlayToImage() {
 }
 
 function currentPreviewUrl() {
-  return !previewImage.hidden && previewImage.currentSrc
-    ? previewImage.currentSrc
-    : !previewImage.hidden
-      ? previewImage.src
-      : "";
+  // currentSrc can still name the previous loaded image while src is changing.
+  return !previewImage.hidden && previewImage.getAttribute("src") ? previewImage.src : "";
 }
 
 function resetForImage() {
   const nextUrl = currentPreviewUrl();
   if (nextUrl === imageUrl) return;
+  imageGeneration += 1;
+  if (samSession && activeOperation?.session !== samSession) disposeSamImage(samSession);
+  activeOperation = null;
   imageUrl = nextUrl;
   samSession = null;
   samReady = false;
@@ -259,25 +285,27 @@ function parseConcepts() {
     .filter(Boolean);
 }
 
-async function ensureSamSession() {
-  if (samSession) return samSession;
-  samSession = await prepareSamImage(imageUrl);
+async function ensureSamSession(operation) {
+  if (!operation.session) operation.session = await prepareSamImage(operation.imageUrl);
+  if (!isCurrent(operation)) return null;
+  samSession = operation.session;
   samReady = true;
   overlay.classList.add("is-sam-ready");
-  return samSession;
+  return operation.session;
 }
 
 async function runConceptDetection() {
   if (!imageUrl || running) return;
   samPoints = [];
-  setBusy(true);
+  const operation = beginOperation();
   clearResults();
   setStatus(`Loading ${OPEN_VOCAB_MODEL_ID} and detecting requested concepts locally…`);
   try {
-    const detections = await detectOpenVocabulary(imageUrl, parseConcepts(), {
+    const detections = await detectOpenVocabulary(operation.imageUrl, parseConcepts(), {
       threshold: 0.08,
       topK: 20,
     });
+    if (!isCurrent(operation)) return;
     lastDetections = detections;
     drawDetections(detections);
     if (detections.length === 0) {
@@ -299,32 +327,34 @@ async function runConceptDetection() {
       "success",
     );
   } catch (error) {
+    if (!isCurrent(operation)) return;
     lastDetections = [];
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
-    setBusy(false);
+    finishOperation(operation);
   }
 }
 
 async function refineDetectionsWithSam() {
   if (!imageUrl || running || lastDetections.length === 0) return;
   samPoints = [];
-  setBusy(true);
+  const operation = beginOperation();
   clearResults();
   const candidates = lastDetections
     .filter((detection) => detection.region.width > 0 && detection.region.height > 0)
     .slice(0, MAX_SAM_REFINEMENTS);
   if (candidates.length === 0) {
     setStatus("No non-empty detector boxes are available for SAM refinement.", "error");
-    setBusy(false);
+    finishOperation(operation);
     return;
   }
 
   try {
-    if (!samSession) {
+    if (!operation.session) {
       setStatus(`Loading ${SAM_MODEL_ID} and computing one reusable image embedding…`);
-      await ensureSamSession();
     }
+    const session = await ensureSamSession(operation);
+    if (!isCurrent(operation)) return;
 
     const refined = [];
     for (let index = 0; index < candidates.length; index += 1) {
@@ -332,7 +362,8 @@ async function refineDetectionsWithSam() {
       setStatus(
         `Refining detector box ${index + 1}/${candidates.length} (${detection.label}) with SAM…`,
       );
-      const segment = await segmentSamBox(samSession, detection.region);
+      const segment = await segmentSamBox(session, detection.region);
+      if (!isCurrent(operation)) return;
       refined.push({ detection, segment });
     }
 
@@ -349,20 +380,22 @@ async function refineDetectionsWithSam() {
       "success",
     );
   } catch (error) {
+    if (!isCurrent(operation)) return;
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
-    setBusy(false);
+    finishOperation(operation);
   }
 }
 
 async function prepareSam() {
   if (!imageUrl || running) return;
   samPoints = [];
-  setBusy(true);
+  const operation = beginOperation();
   clearOverlay();
   setStatus(`Loading ${SAM_MODEL_ID} and computing the image embedding locally…`);
   try {
-    await ensureSamSession();
+    await ensureSamSession(operation);
+    if (!isCurrent(operation)) return;
     setStatus(
       "SAM is ready. Left-click adds a foreground point; right-click adds a background point. Each successful click refines the cumulative prompt.",
       "success",
@@ -372,13 +405,14 @@ async function prepareSam() {
       "The image embedding stays in browser memory; interactive points accumulate until you clear the overlay or change modes.",
     );
   } catch (error) {
+    if (!isCurrent(operation)) return;
     samSession = null;
     samReady = false;
     samPoints = [];
     overlay.classList.remove("is-sam-ready");
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
-    setBusy(false);
+    finishOperation(operation);
   }
 }
 
@@ -399,12 +433,13 @@ async function segmentAtPointer(event) {
   };
   const nextPoints = [...samPoints, point];
 
-  setBusy(true);
+  const operation = beginOperation();
   setStatus(
     `Decoding a SAM mask from ${nextPoints.length} cumulative point${nextPoints.length === 1 ? "" : "s"} on the cached image embedding…`,
   );
   try {
-    const segment = await segmentSamPoints(samSession, nextPoints);
+    const segment = await segmentSamPoints(operation.session, nextPoints);
+    if (!isCurrent(operation)) return;
     samPoints = nextPoints;
     drawMask(segment);
     clearResults();
@@ -417,9 +452,10 @@ async function segmentAtPointer(event) {
       "success",
     );
   } catch (error) {
+    if (!isCurrent(operation)) return;
     setStatus(error instanceof Error ? error.message : String(error), "error");
   } finally {
-    setBusy(false);
+    finishOperation(operation);
   }
 }
 

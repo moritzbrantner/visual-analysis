@@ -2,10 +2,10 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use video_analysis_core::{PixelFormat, SceneDetector};
+use video_analysis_core::PixelFormat;
 use video_analysis_detectors::{
-    AdaptiveDetector, ContentDetector, FlashFilterMode, HashDetector, HistogramDetector,
-    ThresholdDetector,
+    AdaptiveDetector, ContentDetectorConfig, DetectionOptions, HashDetector, HistogramDetector,
+    MinSceneLenPolicy, ThresholdDetector,
 };
 use video_analysis_ffmpeg::FfmpegSourceOptions;
 
@@ -47,10 +47,10 @@ impl FilterMode {
         }
     }
 
-    fn into_flash_filter_mode(self) -> FlashFilterMode {
+    fn into_canonical_policy(self) -> MinSceneLenPolicy {
         match self {
-            Self::Merge => FlashFilterMode::Merge,
-            Self::Suppress => FlashFilterMode::Suppress,
+            Self::Merge => MinSceneLenPolicy::MergeLast,
+            Self::Suppress => MinSceneLenPolicy::Suppress,
         }
     }
 }
@@ -236,38 +236,39 @@ pub fn usage() -> String {
     "usage: scene_dataset_eval --dataset NAME --root PATH [--preset bbc-content-tuned] [--detector content|adaptive|threshold|histogram|hash] [--video-id ID ...] [--limit N] [--resize-width PIXELS] [--pixel-format rgb24|bgr24] [--content-threshold FLOAT] [--min-scene-len FRAMES] [--filter-mode merge|suppress] [--adaptive-threshold FLOAT] [--adaptive-window-width FRAMES] [--adaptive-min-content-val FLOAT] [--post-filter-window FRAMES] [--progress] [--resume] [--max-runtime-seconds SECONDS] [--output PATH]".to_string()
 }
 
-pub fn detector_from_args(args: &Args) -> video_analysis_core::Result<Box<dyn SceneDetector>> {
+pub fn detector_from_args(
+    args: &Args,
+) -> video_analysis_core::Result<(video_analysis_detectors::DetectorConfig, DetectionOptions)> {
+    use video_analysis_detectors::DetectorConfig as CanonicalConfig;
     let config = &args.config;
-    match normalized_detector_name(&args.detector) {
-        Some("content") => Ok(Box::new(
-            ContentDetector::new(config.content_threshold, config.min_scene_len).filter_mode(
-                config.filter_mode.into_flash_filter_mode(),
-                config.min_scene_len,
-            ),
-        )),
-        Some("adaptive") => Ok(Box::new(AdaptiveDetector::new(
-            config.adaptive_threshold,
-            config.min_scene_len,
-            config.adaptive_window_width,
-            config.adaptive_min_content_val,
-        ))),
-        Some("threshold") => Ok(Box::new(ThresholdDetector::new(12.0, config.min_scene_len))),
-        Some("histogram") => Ok(Box::new(HistogramDetector::new(
-            0.05,
-            256,
-            config.min_scene_len,
-        ))),
-        Some("hash") => Ok(Box::new(HashDetector::new(
-            0.395,
-            16,
-            2,
-            config.min_scene_len,
-        ))),
-        _ => Err(video_analysis_core::DetectError::InvalidArgument(format!(
-            "unsupported detector `{}`",
-            args.detector
-        ))),
-    }
+    let detector = match normalized_detector_name(&args.detector) {
+        Some("content") => CanonicalConfig::Content(ContentDetectorConfig {
+            threshold: f64::from(config.content_threshold),
+            ..Default::default()
+        }),
+        Some("adaptive") => CanonicalConfig::Adaptive(AdaptiveDetector {
+            threshold: f64::from(config.adaptive_threshold),
+            frame_window: config.adaptive_window_width,
+            min_content_val: f64::from(config.adaptive_min_content_val),
+            ..Default::default()
+        }),
+        Some("threshold") => CanonicalConfig::Threshold(ThresholdDetector::default()),
+        Some("histogram") => CanonicalConfig::Histogram(HistogramDetector::default()),
+        Some("hash") => CanonicalConfig::Hash(HashDetector::default()),
+        _ => {
+            return Err(video_analysis_core::DetectError::InvalidArgument(format!(
+                "unsupported detector `{}`",
+                args.detector
+            )))
+        }
+    };
+    Ok((
+        detector,
+        DetectionOptions {
+            min_scene_len: config.min_scene_len,
+            min_scene_len_policy: config.filter_mode.into_canonical_policy(),
+        },
+    ))
 }
 
 pub fn eval_configuration(args: &Args) -> EvalConfiguration {

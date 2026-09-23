@@ -107,3 +107,16 @@ test("binary mask summaries preserve active-pixel counts and tight bounds", () =
     region: { x: 1, y: 1, width: 2, height: 2 },
   });
 });
+
+test("disposing an image releases each tensor once but retains the shared model", async () => {
+  const { disposeSamImage } = await import("../../site/vision-models.js");
+  let tensors = 0;
+  let models = 0;
+  const shared = { dispose() { tensors += 1; } };
+  const session = { model: { dispose() { models += 1; } },
+    embeddings: { image_embeddings: shared }, processed: { duplicate: shared, pixel_values: { dispose() { tensors += 1; } } } };
+  disposeSamImage(session);
+  disposeSamImage(session);
+  assert.equal(tensors, 2);
+  assert.equal(models, 0);
+});
