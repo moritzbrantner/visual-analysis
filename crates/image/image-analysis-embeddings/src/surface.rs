@@ -310,6 +310,7 @@ fn face_embed_value(request: FaceEmbedRequest) -> Result<serde_json::Value, Stri
             .map_err(|error| error.to_string())?
     };
 
+    let alignment = embedding.attributes.get("facePreprocessing").cloned();
     Ok(serde_json::json!({
         "executed": true,
         "nativeOnly": true,
@@ -329,7 +330,7 @@ fn face_embed_value(request: FaceEmbedRequest) -> Result<serde_json::Value, Stri
             "width": region.width,
             "height": region.height
         })),
-        "alignment": embedding.attributes.get("facePreprocessing"),
+        "alignment": alignment,
         "attributes": embedding.attributes
     }))
 }
