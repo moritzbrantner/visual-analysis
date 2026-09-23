@@ -35,7 +35,7 @@ vision-core.workspace = true
 [features]
 default = []
 onnx = ["runtime-onnx/onnxruntime"]
-external-tests = ["onnx"]
+external-tests = ["onnx", "image-analysis-detection/onnx"]
 
 [dev-dependencies]
 criterion.workspace = true
