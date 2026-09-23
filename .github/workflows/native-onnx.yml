@@ -128,6 +128,13 @@ jobs:
           cargo test --locked -p moenarch-image-analysis-detection --features onnx --lib
           cargo test --locked -p moenarch-image-analysis-embeddings --features onnx --lib
 
+      - name: Verify SFace alignment benchmark contract
+        run: cargo test --locked -p moenarch-image-analysis-embeddings --bench sface_alignment -- --test
+
+      - name: Measure SFace alignment
+        if: github.event_name == 'push'
+        run: cargo bench --locked -p moenarch-image-analysis-embeddings --bench sface_alignment -- --noplot
+
       - name: Prepare semantic image fixtures
         run: bash scripts/setup_visual_acceptance_fixtures.sh
 
