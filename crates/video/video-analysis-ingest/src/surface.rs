@@ -3,12 +3,20 @@
 #[cfg(feature = "ocr")]
 pub mod scene_ocr;
 
-use crate::{analyze_video_source, VideoFrameSource};
+use crate::VideoFrameSource;
+use num_rational::Rational64;
 use runtime_core::{
     structured_surface_value, OperationId, PackageSurface, RuntimeCapabilities, SurfaceOperation,
     SurfaceRequest, SurfaceResponse,
 };
-use video_analysis_core::{ContentDetector, DetectError, DetectionResult, ScenePipeline};
+use video_analysis_core::{
+    scenes_from_cuts, Cut, DetectError, DetectionResult, FramePosition, MetricsSink, MetricsStore,
+    OwnedVideoFrame, VideoSource,
+};
+use video_analysis_detectors::{
+    analyze_content_source, BoundaryReviewOptions, ContentDetectorConfig, DetectionOptions,
+    MinSceneLenPolicy,
+};
 
 /// Returns the package surface exposed by every transport wrapper.
 pub fn package_surface() -> PackageSurface {
@@ -56,7 +64,7 @@ pub fn package_surface() -> PackageSurface {
     }
 }
 
-/// Runs the canonical content-scene compatibility detector over a decoded video source.
+/// Runs one canonical content-detection pass over a decoded video source.
 ///
 /// Consumers own source selection and persistence. Scene algorithm ownership remains in
 /// `scenedetect-core`; this function only composes the existing visual-analysis ingest
@@ -80,11 +88,109 @@ where
         ));
     }
 
-    let mut pipeline = ScenePipeline::builder()
-        .detector(ContentDetector::new(threshold, min_scene_len))
-        .start_in_scene(true)
-        .build()?;
-    analyze_video_source(source, &mut pipeline, |_| Ok(()))
+    let declared_rate = source
+        .source_info()
+        .video
+        .as_ref()
+        .and_then(|video| video.frame_rate)
+        .filter(|rate| *rate.numer() > 0 && *rate.denom() > 0);
+    let (rate, pending_frame) = if let Some(rate) = declared_rate {
+        (rate, None)
+    } else {
+        let Some(frame) = source.next_video_frame()? else {
+            return Ok(DetectionResult::default());
+        };
+        let timebase = frame.position.timestamp.timebase;
+        if timebase.num <= 0 || timebase.den <= 0 {
+            return Err(DetectError::InvalidArgument(
+                "content detection requires a positive source frame rate or frame timebase".into(),
+            ));
+        }
+        (
+            Rational64::new(i64::from(timebase.den), i64::from(timebase.num)),
+            Some(frame),
+        )
+    };
+    let mut positions = Vec::new();
+    let analysis = analyze_content_source(
+        PositionedSource {
+            source,
+            positions: &mut positions,
+            rate,
+            pending_frame,
+        },
+        ContentDetectorConfig {
+            threshold: f64::from(threshold),
+            ..Default::default()
+        },
+        DetectionOptions {
+            min_scene_len,
+            min_scene_len_policy: MinSceneLenPolicy::MergeLast,
+        },
+        BoundaryReviewOptions::default(),
+    )?;
+    if positions.is_empty() {
+        return Ok(DetectionResult::default());
+    }
+    let cuts = analysis
+        .scene_list
+        .scenes
+        .iter()
+        .skip(1)
+        .map(|scene| Cut {
+            position: positions[scene.start.0 as usize],
+            detector: "content",
+            score: None,
+        })
+        .collect::<Vec<_>>();
+    let mut metrics = MetricsStore::default();
+    for row in analysis.detection_stats.rows {
+        for (key, value) in row.metrics {
+            metrics.set_metric(positions[row.frame.0 as usize].frame_index, &key, value);
+        }
+    }
+    Ok(DetectionResult {
+        scenes: scenes_from_cuts(&cuts, positions[0], *positions.last().unwrap(), true),
+        cuts,
+        metrics,
+        frames_processed: positions.len() as u64,
+    })
+}
+
+// Canonical detection uses ordinal frame indices; retain only small position
+// records for the public visual timeline, never the decoded RGB history.
+struct PositionedSource<'a, S> {
+    source: &'a mut S,
+    positions: &'a mut Vec<FramePosition>,
+    rate: Rational64,
+    pending_frame: Option<OwnedVideoFrame>,
+}
+impl<S: VideoFrameSource> VideoSource for PositionedSource<'_, S> {
+    fn frame_rate(&self) -> Rational64 {
+        self.rate
+    }
+    fn next_frame(&mut self) -> video_analysis_core::Result<Option<OwnedVideoFrame>> {
+        let next = if self.pending_frame.is_some() {
+            self.pending_frame.take()
+        } else {
+            self.source.next_video_frame()?
+        };
+        let Some(mut frame) = next else {
+            return Ok(None);
+        };
+        if self
+            .positions
+            .last()
+            .is_some_and(|previous| previous.frame_index >= frame.position.frame_index)
+        {
+            return Err(DetectError::InvalidArgument(
+                "source frame indices must strictly increase".into(),
+            ));
+        }
+        self.positions.push(frame.position);
+        frame.position.frame_index = self.positions.len() as u64 - 1;
+        Ok(Some(frame))
+    }
 }
 
 fn operation(

@@ -7,9 +7,9 @@ use semantic_core::{
 use serde::{Deserialize, Serialize};
 use video_analysis_core::{BoundingBox, DetectError, Observation, ObservationKind, Result, Scene};
 
-const CLASSIFIER_VERSION: &str = "1";
-const MAX_FALLBACK_GAP_SECONDS: f64 = 8.0;
-const MAX_FALLBACK_GAP_FRAMES: u64 = 240;
+const CLASSIFIER_VERSION: &str = "2";
+pub(crate) const MAX_FALLBACK_GAP_SECONDS: f64 = 8.0;
+pub(crate) const MAX_FALLBACK_GAP_FRAMES: u64 = 240;
 const MIN_FALLBACK_IOU: f64 = 0.30;
 const MAX_CENTER_DELTA_RATIO: f64 = 0.08;
 
@@ -366,6 +366,20 @@ fn fallback_match_score(
     {
         return None;
     }
+    // Equal-time observations are not separate temporal samples. Co-located
+    // duplicates may share identity, but neighboring equal strings must not.
+    if last.frame.is_some() && last.frame == sample.frame
+        || last.seconds.is_some() && last.seconds == sample.seconds
+        || last.frame.is_none()
+            && sample.frame.is_none()
+            && last.seconds.is_none()
+            && sample.seconds.is_none()
+    {
+        return (last.frame == sample.frame
+            && last.seconds == sample.seconds
+            && last.region == sample.region)
+            .then_some(2.0);
+    }
     if !within_temporal_gap(last, sample) {
         return None;
     }
@@ -632,7 +646,7 @@ fn classify_track(
 }
 
 fn is_subtitle_like(context: VideoTextSemanticContext<'_>, summary: &TrackSummary) -> bool {
-    if summary.sample_count < 2 {
+    if !is_temporally_stable(summary) {
         return false;
     }
     let Some(region) = summary.representative_region else {
@@ -661,7 +675,7 @@ fn is_temporally_stable(summary: &TrackSummary) -> bool {
         (Some(start), Some(end)) => end > start,
         _ => match (summary.start_frame, summary.end_frame) {
             (Some(start), Some(end)) => end > start,
-            _ => true,
+            _ => false,
         },
     }
 }

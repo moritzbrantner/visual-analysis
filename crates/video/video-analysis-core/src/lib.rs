@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 
+mod frame_preparation;
 pub mod runtime;
 pub mod surface;
 pub use audio_contracts::{
@@ -296,7 +297,17 @@ impl<'a> VideoFrame<'a> {
         if width == 0 || height == 0 {
             return Err(DetectError::InvalidDimensions { width, height });
         }
-        let expected = stride * height as usize;
+        let row_bytes = (width as usize).checked_mul(3).ok_or_else(|| {
+            DetectError::InvalidArgument("frame row overflows address space".into())
+        })?;
+        if stride < row_bytes {
+            return Err(DetectError::InvalidArgument(
+                "frame stride is smaller than a pixel row".into(),
+            ));
+        }
+        let expected = stride.checked_mul(height as usize).ok_or_else(|| {
+            DetectError::InvalidArgument("frame buffer overflows address space".into())
+        })?;
         if data.len() < expected {
             return Err(DetectError::InvalidFrameBuffer {
                 expected,
@@ -393,6 +404,9 @@ impl MetricsSink for MetricsStore {
 
 /// Trait for scene detector implementations.
 pub trait SceneDetector {
+    /// Clears all per-source history while preserving detector configuration.
+    /// Stateful implementations must override this before pipeline reuse.
+    fn reset(&mut self) {}
     /// Returns name.
     fn name(&self) -> &'static str;
     /// Returns metric keys.
@@ -425,7 +439,6 @@ pub enum FlashFilterMode {
     /// The suppress variant.
     Suppress,
 }
-
 
 #[derive(Debug, Clone, Copy)]
 /// Compatibility weights converted explicitly into the canonical scene contract.
@@ -562,6 +575,11 @@ impl ContentDetector {
 }
 
 impl SceneDetector for ContentDetector {
+    fn reset(&mut self) {
+        self.frames.clear();
+        self.emitted.clear();
+    }
+
     fn name(&self) -> &'static str {
         "content"
     }
@@ -619,7 +637,6 @@ impl SceneDetector for ContentDetector {
             .collect())
     }
 }
-
 
 fn position_like(current: FramePosition, frame_index: u64) -> FramePosition {
     let delta = frame_index as i64 - current.frame_index as i64;
@@ -966,7 +983,7 @@ pub struct CropRegion {
 impl CropRegion {
     /// Creates a new value.
     pub fn new(x0: u32, y0: u32, x1: u32, y1: u32) -> Result<Self> {
-        if x0 == x1 || y0 == y1 {
+        if x0 >= x1 || y0 >= y1 {
             return Err(DetectError::InvalidArgument(
                 "crop region must have non-zero width and height".to_string(),
             ));
@@ -992,7 +1009,6 @@ impl ScenePipeline {
 
     /// Returns process frame.
     pub fn process_frame(&mut self, frame: OwnedVideoFrame) -> Result<FrameAnalysis> {
-        let frame = self.prepare_frame(frame)?;
         self.process_frame_ref(&frame.as_frame())
     }
 
@@ -1003,7 +1019,9 @@ impl ScenePipeline {
                 "cannot process frames after finish_detection; call reset first".to_string(),
             ));
         }
-        self.validate_frame_options(frame)?;
+        let prepared = frame_preparation::prepare(frame, self.crop, self.auto_downscale_min_width)?;
+        let prepared_view = prepared.as_ref().map(OwnedVideoFrame::as_frame);
+        let frame = prepared_view.as_ref().unwrap_or(frame);
         self.state.first_position.get_or_insert(frame.position);
         self.state.last_position = Some(frame.position);
 
@@ -1054,6 +1072,9 @@ impl ScenePipeline {
 
     /// Returns reset.
     pub fn reset(&mut self) {
+        for detector in &mut self.detectors {
+            detector.reset();
+        }
         self.state = ScenePipelineState::default();
     }
 
@@ -1090,23 +1111,6 @@ impl ScenePipeline {
         }
         self.state.cuts.sort_by_key(|cut| cut.position.frame_index);
         accepted
-    }
-
-    fn prepare_frame(&self, frame: OwnedVideoFrame) -> Result<OwnedVideoFrame> {
-        self.validate_frame_options(&frame.as_frame())?;
-        Ok(frame)
-    }
-
-    fn validate_frame_options(&self, frame: &VideoFrame<'_>) -> Result<()> {
-        let _ = self.auto_downscale_min_width;
-        if let Some(crop) = self.crop {
-            if crop.x0 >= frame.width || crop.y0 >= frame.height {
-                return Err(DetectError::InvalidArgument(
-                    "crop starts outside frame boundary".to_string(),
-                ));
-            }
-        }
-        Ok(())
     }
 }
 

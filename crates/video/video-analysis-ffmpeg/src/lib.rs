@@ -1,9 +1,11 @@
 #![doc = include_str!("../README.md")]
 
+mod decoder_process;
 pub mod surface;
+use decoder_process::DecoderProcess;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdout, Command, Stdio};
+use std::process::{Command, Stdio};
 
 use num_rational::Rational64;
 use thiserror::Error;
@@ -421,8 +423,7 @@ impl FfmpegAudioSourceOptions {
 pub struct FfmpegVideoSource {
     metadata: VideoMetadata,
     source_info: MediaSourceInfo,
-    child: Child,
-    stdout: ChildStdout,
+    process: DecoderProcess,
     next_frame_index: u64,
     frame_size: usize,
 }
@@ -468,12 +469,20 @@ impl FfmpegVideoSource {
 
     fn spawn(input: String, metadata: VideoMetadata, options: FfmpegSourceOptions) -> Result<Self> {
         reject_native_runtime(&options.runtime)?;
-        let resized = options.resize_width.map(|width| {
-            (
-                width,
-                scaled_even_height(metadata.width, metadata.height, width),
-            )
-        });
+        if metadata.width == 0 || metadata.height == 0 || options.resize_width == Some(0) {
+            return Err(DetectError::InvalidArgument(
+                "video dimensions must be non-zero".into(),
+            ));
+        }
+        let resized = options
+            .resize_width
+            .map(|width| -> Result<(u32, u32)> {
+                Ok((
+                    width,
+                    scaled_even_height(metadata.width, metadata.height, width)?,
+                ))
+            })
+            .transpose()?;
         let output_width = options
             .output_width
             .or_else(|| resized.map(|(width, _)| width))
@@ -482,6 +491,13 @@ impl FfmpegVideoSource {
             .output_height
             .or_else(|| resized.map(|(_, height)| height))
             .unwrap_or(metadata.height);
+        let frame_size = (output_width as usize)
+            .checked_mul(output_height as usize)
+            .and_then(|pixels| pixels.checked_mul(3))
+            .filter(|bytes| *bytes > 0 && *bytes <= isize::MAX as usize)
+            .ok_or_else(|| {
+                DetectError::InvalidArgument("video dimensions overflow a frame buffer".into())
+            })?;
         let source_info = MediaSourceInfo {
             input: metadata.input.clone(),
             mode: metadata.mode,
@@ -512,9 +528,9 @@ impl FfmpegVideoSource {
             .arg("-map")
             .arg("0:v:0")
             .arg("-an");
-        let resize_filter = options
-            .resize_width
-            .map(|width| format!("scale={width}:-2"));
+        // The filter and reader share these exact dimensions. FFmpeg's -2
+        // rounding is not interchangeable with integer aspect-ratio rounding.
+        let resize_filter = resized.map(|(width, height)| format!("scale={width}:{height}"));
         if let Some(filter) = resize_filter {
             command.arg("-vf").arg(filter);
         }
@@ -533,7 +549,7 @@ impl FfmpegVideoSource {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let mut child = command.spawn().map_err(|err| {
+        let child = command.spawn().map_err(|err| {
             DetectError::Source(
                 FfmpegError::StartFailed {
                     input: input.clone(),
@@ -542,15 +558,11 @@ impl FfmpegVideoSource {
                 .to_string(),
             )
         })?;
-        let stdout = child.stdout.take().ok_or_else(|| {
-            DetectError::Source("ffmpeg stdout pipe was not available".to_string())
-        })?;
-        let frame_size = output_width as usize * output_height as usize * 3;
+        let process = DecoderProcess::new(child)?;
         Ok(Self {
             metadata,
             source_info,
-            child,
-            stdout,
+            process,
             next_frame_index: 0,
             frame_size,
         })
@@ -570,7 +582,7 @@ impl FfmpegVideoSource {
         let mut data = vec![0_u8; self.frame_size];
         let mut offset = 0;
         while offset < self.frame_size {
-            match self.stdout.read(&mut data[offset..]) {
+            match self.process.read(&mut data[offset..]) {
                 Ok(0) if offset == 0 => return Ok(None),
                 Ok(0) => {
                     return Err(DetectError::Source(
@@ -603,17 +615,16 @@ fn ffmpeg_pixel_format(pixel_format: PixelFormat) -> &'static str {
     }
 }
 
-fn scaled_even_height(input_width: u32, input_height: u32, output_width: u32) -> u32 {
+fn scaled_even_height(input_width: u32, input_height: u32, output_width: u32) -> Result<u32> {
+    if input_width == 0 || input_height == 0 || output_width == 0 {
+        return Err(DetectError::InvalidArgument(
+            "resize dimensions must be positive".into(),
+        ));
+    }
     let scaled = u64::from(input_height) * u64::from(output_width) / u64::from(input_width);
     let even = scaled - (scaled % 2);
-    even.max(2) as u32
-}
-
-impl Drop for FfmpegVideoSource {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
+    u32::try_from(even.max(2))
+        .map_err(|_| DetectError::InvalidArgument("resized height exceeds u32".into()))
 }
 
 impl VideoSource for FfmpegVideoSource {
@@ -651,8 +662,7 @@ impl MediaSource for FfmpegVideoSource {
 pub struct FfmpegAudioSource {
     metadata: AudioMetadata,
     source_info: MediaSourceInfo,
-    child: Child,
-    stdout: ChildStdout,
+    process: DecoderProcess,
     next_sample_index: u64,
     samples_per_chunk: usize,
 }
@@ -755,22 +765,18 @@ impl FfmpegAudioSource {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let mut child = command.spawn().map_err(|err| FfmpegError::StartFailed {
+        let child = command.spawn().map_err(|err| FfmpegError::StartFailed {
             input: input.clone(),
             message: err.to_string(),
         })?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| FfmpegError::StartFailed {
-                input: input.clone(),
-                message: "ffmpeg stdout pipe was not available".to_string(),
-            })?;
+        let process = DecoderProcess::new(child).map_err(|err| FfmpegError::StartFailed {
+            input: input.clone(),
+            message: err.to_string(),
+        })?;
         Ok(Self {
             metadata,
             source_info,
-            child,
-            stdout,
+            process,
             next_sample_index: 0,
             samples_per_chunk: options.samples_per_chunk.max(1),
         })
@@ -793,7 +799,7 @@ impl FfmpegAudioSource {
         let mut bytes = vec![0_u8; target_bytes];
         let mut offset = 0;
         while offset < target_bytes {
-            match self.stdout.read(&mut bytes[offset..]) {
+            match self.process.read(&mut bytes[offset..]) {
                 Ok(0) if offset == 0 => return Ok(None),
                 Ok(0) => break,
                 Ok(read) => offset += read,
@@ -801,7 +807,12 @@ impl FfmpegAudioSource {
                 Err(err) => return Err(DetectError::Io(err)),
             }
         }
-        bytes.truncate(offset - (offset % bytes_per_sample_frame));
+        if offset % bytes_per_sample_frame != 0 {
+            return Err(DetectError::Source(
+                "ffmpeg ended in the middle of an audio sample frame".into(),
+            ));
+        }
+        bytes.truncate(offset);
         if bytes.is_empty() {
             return Ok(None);
         }
@@ -852,13 +863,6 @@ fn build_audio_ffmpeg_args(
         "pipe:1".to_string(),
     ]);
     args
-}
-
-impl Drop for FfmpegAudioSource {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 impl AudioFrameSource for FfmpegAudioSource {
@@ -1714,10 +1718,10 @@ mod tests {
     }
 
     #[test]
-    fn resize_height_matches_ffmpeg_scale_negative_two_rounding() {
-        assert_eq!(scaled_even_height(720, 1280, 320), 568);
-        assert_eq!(scaled_even_height(1920, 1080, 320), 180);
-        assert_eq!(scaled_even_height(9, 16, 4), 6);
+    fn explicit_resize_height_preserves_integer_aspect_policy() {
+        assert_eq!(scaled_even_height(720, 1280, 320).unwrap(), 568);
+        assert_eq!(scaled_even_height(1920, 1080, 320).unwrap(), 180);
+        assert_eq!(scaled_even_height(9, 16, 4).unwrap(), 6);
     }
 
     #[test]

@@ -68,6 +68,23 @@ export async function prepareSamImage(imageUrl) {
   return { ...runtime, image, processed, embeddings };
 }
 
+// Image-specific tensors have a shorter lifetime than the cached model runtime.
+const disposedSamSessions = new WeakSet();
+export function disposeSamImage(session) {
+  if (!session || disposedSamSessions.has(session)) return;
+  disposedSamSessions.add(session);
+  const tensors = new Set([
+    ...Object.values(session.embeddings ?? {}),
+    ...Object.values(session.processed ?? {}),
+  ]);
+  for (const tensor of tensors) {
+    if (typeof tensor?.dispose === "function") {
+      // Disposal may return a promise depending on the execution backend.
+      try { Promise.resolve(tensor.dispose()).catch(() => {}); } catch { /* best-effort cleanup */ }
+    }
+  }
+}
+
 function requireSamSession(session) {
   if (!session?.embeddings || !session?.processed || !session?.Tensor) {
     throw new Error("SAM image embeddings are not ready.");

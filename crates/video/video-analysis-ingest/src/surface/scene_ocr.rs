@@ -25,8 +25,9 @@ pub struct SceneAwareOcrAnalysis {
 /// This function deliberately owns no OCR algorithm and no scene detector. The
 /// caller supplies canonical scenes and an `OcrBackend`; this layer only performs
 /// reusable video sampling/composition. Each scene contributes its start, midpoint,
-/// and final included frame (deduplicated), allowing downstream applications to
-/// avoid running expensive OCR on every frame while retaining deterministic coverage.
+/// and final included frame (deduplicated). Long scenes add bounded cadence samples
+/// compatible with the temporal tracker rather than silently splitting static text.
+/// This avoids running expensive OCR on every frame while retaining deterministic coverage.
 pub fn analyze_scene_aware_ocr<S, B>(
     source: &mut S,
     backend: B,
@@ -60,25 +61,29 @@ where
         .video
         .as_ref()
         .map(|video| (video.width, video.height))
-        .ok_or_else(|| DetectError::InvalidArgument("video source has no video stream".to_string()))?;
+        .ok_or_else(|| {
+            DetectError::InvalidArgument("video source has no video stream".to_string())
+        })?;
     if width == 0 || height == 0 {
         return Err(DetectError::InvalidArgument(
             "scene-aware OCR requires non-zero video dimensions".to_string(),
         ));
     }
 
-    let targets = representative_scene_frames(scenes)?;
+    let mut remaining = representative_scene_frames(scenes)?;
     let analyzer = OcrVideoAnalyzer::new("ocr", backend).request(request);
-    let mut pipeline = VideoAnalysisPipeline::builder().analyzer(analyzer).build()?;
-    let mut sampled_frames = Vec::with_capacity(targets.len());
+    let mut pipeline = VideoAnalysisPipeline::builder()
+        .analyzer(analyzer)
+        .build()?;
+    let mut sampled_frames = Vec::with_capacity(remaining.len());
 
     while let Some(frame) = source.next_video_frame()? {
         let frame_index = frame.position.frame_index;
-        if targets.contains(&frame_index) {
+        if remaining.remove(&frame_index) {
             pipeline.process_frame(frame)?;
             sampled_frames.push(frame_index);
         }
-        if sampled_frames.len() == targets.len() {
+        if remaining.is_empty() {
             break;
         }
     }
@@ -150,7 +155,11 @@ mod tests {
         ) -> Result<OcrDocument> {
             let call = self.calls.get();
             self.calls.set(call + 1);
-            let text = if call < 3 { "First Slide" } else { "Second Slide" };
+            let text = if call < 3 {
+                "First Slide"
+            } else {
+                "Second Slide"
+            };
             OcrDocument::new(text, image.width, image.height)
         }
     }
@@ -180,7 +189,10 @@ mod tests {
     #[test]
     fn representative_sampling_covers_scene_edges_and_midpoints() {
         let frames = representative_scene_frames(&[scene(0, 5), scene(5, 9)]).unwrap();
-        assert_eq!(frames.into_iter().collect::<Vec<_>>(), vec![0, 2, 4, 5, 6, 8]);
+        assert_eq!(
+            frames.into_iter().collect::<Vec<_>>(),
+            vec![0, 2, 4, 5, 6, 8]
+        );
     }
 
     #[test]

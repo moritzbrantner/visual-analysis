@@ -52,15 +52,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut iterations = Vec::new();
     for iteration in 1..=args.iterations {
-        let mut detector = detector_from_args(&eval_args)?;
+        let (detector, options) = detector_from_args(&eval_args)?;
+        let canonical = frames
+            .iter()
+            .map(|frame| scenedetect_core::Frame {
+                index: scenedetect_core::FrameIndex(frame.position.frame_index),
+                width: frame.width,
+                height: frame.height,
+                rgb: (0..frame.height)
+                    .flat_map(|y| {
+                        (0..frame.width).flat_map(move |x| frame.as_frame().pixel_rgb(x, y))
+                    })
+                    .collect(),
+            })
+            .collect::<Vec<_>>();
+        let rate = frames
+            .get(1)
+            .zip(frames.first())
+            .map(|(second, first)| {
+                1.0 / (second.position.timestamp.seconds() - first.position.timestamp.seconds())
+            })
+            .unwrap_or(30.0);
         let started = Instant::now();
-        let mut cuts = 0usize;
-        for frame in &frames {
-            cuts += detector.process_frame(&frame.as_frame(), None)?.len();
-        }
-        if let Some(last) = frames.last() {
-            cuts += detector.finish(last.position, None)?.len();
-        }
+        let result = scenedetect_core::detect_frames(
+            detector,
+            scenedetect_core::FrameRate(rate),
+            &canonical,
+            options,
+        )?;
+        let cuts = result.scene_list.scenes.len().saturating_sub(1);
         iterations.push(IterationReport {
             iteration,
             detector_elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
