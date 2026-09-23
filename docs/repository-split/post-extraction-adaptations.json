@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "base_extraction_sha": "b8b29cf8db0b86ed1b133a18155adf24992f9483",
-  "reason": "Post-bootstrap feature work promoting existing OCR, detection, segmentation, face, embedding, and video recognition capabilities to executable standard surfaces, explicit model contracts, and evidence-backed semantic analysis while preserving source ownership boundaries. Regression maintenance covers decoder framing/process lifecycle, canonical one-pass scene composition, frame preparation/reset, and OCR temporal association; old extracted detector tests/examples are adapted to the canonical owner rather than importing monolith support. Generic text-pipeline compatibility is removed so text orchestration stays consumer-owned while text DTO compatibility remains available.",
+  "reason": "Post-bootstrap feature work promoting existing OCR, detection, segmentation, face, embedding, and video recognition capabilities to executable standard surfaces, explicit model contracts, and evidence-backed semantic analysis while preserving source ownership boundaries. Regression maintenance covers decoder framing/process lifecycle, canonical one-pass scene composition, frame preparation/reset, and OCR temporal association; old extracted detector tests/examples are adapted to the canonical owner rather than importing monolith support. Generic text-pipeline compatibility is removed so text orchestration stays consumer-owned while text DTO compatibility remains available. SFace face embedding now consumes the existing YuNet five-landmark contract for canonical similarity alignment before feature extraction.",
   "paths": [
     "crates/image/image-analysis-detection-cli/Cargo.toml",
     "crates/image/image-analysis-detection-server/Cargo.toml",
@@ -14,6 +14,7 @@
     "crates/image/image-analysis-embeddings-server/Cargo.toml",
     "crates/image/image-analysis-embeddings/Cargo.toml",
     "crates/image/image-analysis-embeddings/README.md",
+    "crates/image/image-analysis-embeddings/src/lib.rs",
     "crates/image/image-analysis-embeddings/src/surface.rs",
     "crates/image/image-analysis-ocr-cli/Cargo.toml",
     "crates/image/image-analysis-ocr-server/Cargo.toml",
