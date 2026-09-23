@@ -152,6 +152,14 @@ jobs:
           --test external_onnx_smoke
           -- --ignored --nocapture
 
+      - name: Verify YuNet to aligned SFace through standard surfaces
+        run: >-
+          cargo test --locked -p moenarch-image-analysis-embeddings
+          --features external-tests
+          --test external_onnx_smoke
+          standard_face_detection_and_sface_embedding_align
+          -- --ignored --nocapture
+
       - name: Deactivate pinned source dependencies
         if: always()
         run: bash scripts/source-deps deactivate || true
