@@ -1,5 +1,5 @@
 use video_analysis_core::{
-    AnalysisEvent, Observation, Result, TextAnalyzer, TextSegment, VideoAnalyzer, VideoFrame,
+    AnalysisEvent, Observation, Result, TextSegment, VideoAnalyzer, VideoFrame,
 };
 
 use model_runtime::{ModelRuntimeBackend, ModelTask};
@@ -435,18 +435,15 @@ impl<B> ModelTextAnalyzer<B> {
     }
 }
 
-impl<B: TextModelBackend> TextAnalyzer for ModelTextAnalyzer<B> {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn process_segment(&mut self, segment: &TextSegment<'_>) -> Result<Vec<AnalysisEvent>> {
+impl<B: TextModelBackend> ModelTextAnalyzer<B> {
+    /// Analyzes one text segment using this model backend.
+    pub fn analyze_segment(&mut self, segment: &TextSegment<'_>) -> Result<Vec<AnalysisEvent>> {
         let task = self.backend.task();
         let raw = self.backend.predict_text(segment)?;
         Ok(normalize_predictions(raw, &task, None, self.repair)
             .into_iter()
             .map(|prediction| {
-                let mut event = prediction.to_event(self.name());
+                let mut event = prediction.to_event(&self.name);
                 if let Some(timestamp) = segment.timestamp {
                     event = event.at_timestamp(timestamp);
                 }
