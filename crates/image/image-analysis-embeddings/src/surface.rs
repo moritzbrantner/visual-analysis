@@ -552,11 +552,11 @@ mod tests {
         assert_eq!(operation.input_schema["properties"]["landmarks"]["minItems"], 5);
         assert_eq!(
             operation.input_schema["properties"]["landmarks"]["items"]["items"]["minimum"],
-            0.0
+            serde_json::json!(0.0)
         );
         assert_eq!(
             operation.input_schema["properties"]["landmarks"]["items"]["items"]["maximum"],
-            1.0
+            serde_json::json!(1.0)
         );
         assert_eq!(
             operation.input_schema["allOf"][0]["if"]["required"],
@@ -620,7 +620,15 @@ mod tests {
     #[test]
     fn face_embed_rejects_landmarks_without_region_before_bundle_resolution() {
         assert_landmark_request_fails_before_bundle_resolution(
-            serde_json::json!({"landmarks": [[0.3, 0.3]; 5]}),
+            serde_json::json!({
+                "landmarks": [
+                    [0.3, 0.3],
+                    [0.6, 0.3],
+                    [0.45, 0.5],
+                    [0.4, 0.7],
+                    [0.6, 0.7]
+                ]
+            }),
             "require a region",
         );
     }
@@ -630,7 +638,12 @@ mod tests {
         assert_landmark_request_fails_before_bundle_resolution(
             serde_json::json!({
                 "region": {"x": 0, "y": 0, "width": 1, "height": 1},
-                "landmarks": [[0.3, 0.3]; 4]
+                "landmarks": [
+                    [0.3, 0.3],
+                    [0.6, 0.3],
+                    [0.4, 0.7],
+                    [0.6, 0.7]
+                ]
             }),
             "exactly five",
         );
