@@ -19,7 +19,7 @@ keywords = ["video", "image", "vision", "analysis", "computer-vision"]
 categories = ["multimedia", "computer-vision", "science", "algorithms"]
 
 [workspace.dependencies]
-base64 = "0.22.1"
+base64 = "0.23.0"
 clap = { version = "4.5.51", features = ["derive"] }
 criterion = "0.5.1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
