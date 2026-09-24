@@ -1418,6 +1418,7 @@ dependencies = [
 name = "moenarch-image-analysis-embeddings"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "moenarch-image-analysis-core",
  "moenarch-image-analysis-detection",
  "moenarch-image-analysis-io",

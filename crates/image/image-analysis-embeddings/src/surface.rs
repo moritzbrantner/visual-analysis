@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use image_analysis_core::contracts::{sample_image_json, ImagePayload};
-use image_analysis_detection::{FaceBox, FaceDetection};
+use image_analysis_detection::{FaceBox, FaceDetection, FaceLandmarks};
 use model_runtime::ModelBundleResolveOptions;
 use runtime_core::{
     describe_surface_response, structured_operation_response, OperationId, PackageSurface,
@@ -43,8 +43,8 @@ pub fn package_surface() -> PackageSurface {
             operation(
                 "image.embeddings.faceEmbed",
                 "Embed face",
-                "Runs OpenCV SFace ONNX embedding for a whole image or an optional pixel-space face region. Model downloads remain opt-in through autoDownload.",
-                serde_json::json!({"image": sample_image_json(), "model": DEFAULT_FACE_EMBEDDING_MODEL, "region": {"x": 0, "y": 0, "width": 2, "height": 2}, "autoDownload": false}),
+                "Runs OpenCV SFace ONNX embedding for a whole image or face region. Five normalized YuNet landmarks trigger canonical SFace alignment before feature extraction. Model downloads remain opt-in through autoDownload.",
+                serde_json::json!({"image": sample_image_json(), "model": DEFAULT_FACE_EMBEDDING_MODEL, "region": {"x": 0, "y": 0, "width": 2, "height": 2}, "landmarks": [[0.34, 0.42], [0.66, 0.42], [0.50, 0.58], [0.38, 0.76], [0.62, 0.76]], "autoDownload": false}),
             ),
             operation(
                 "image.embeddings.schema",
@@ -79,15 +79,75 @@ fn operation(
         wasm_supported: true,
         server_supported: true,
     };
+    if id == "image.embeddings.models" {
+        operation.input_schema = models_input_schema();
+        operation.input_schema["xOperationCategory"] =
+            serde_json::json!(runtime_core::operation_category(id));
+    }
     if id == "image.embeddings.faceEmbed" {
         let plan = model_execution_plan(id);
+        operation.input_schema = face_embed_input_schema();
         operation.input_schema["xExecutionPlan"] =
             runtime_core::surface_execution_plan_value(&plan);
+        operation.input_schema["xOperationCategory"] =
+            serde_json::json!(runtime_core::operation_category(id));
         operation.output_schema["xExecutionPlan"] =
             runtime_core::surface_execution_plan_value(&plan);
         operation.wasm_supported = false;
     }
     operation
+}
+
+fn models_input_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "task": {"type": "string"}
+        }
+    })
+}
+
+fn face_embed_input_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "image": {"type": "object"},
+            "imagePath": {"type": "string", "minLength": 1},
+            "model": {"type": "string"},
+            "autoDownload": {"type": "boolean"},
+            "modelRoot": {"type": "string"},
+            "region": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["x", "y", "width", "height"],
+                "properties": {
+                    "x": {"type": "integer", "minimum": 0},
+                    "y": {"type": "integer", "minimum": 0},
+                    "width": {"type": "integer", "minimum": 1},
+                    "height": {"type": "integer", "minimum": 1}
+                }
+            },
+            "landmarks": {
+                "type": "array",
+                "minItems": 5,
+                "maxItems": 5,
+                "items": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+                }
+            }
+        },
+        "allOf": [
+            {
+                "if": {"required": ["landmarks"]},
+                "then": {"required": ["region"]}
+            }
+        ]
+    })
 }
 
 fn model_execution_plan(operation: &str) -> SurfaceExecutionPlan {
@@ -146,13 +206,13 @@ pub fn run_surface_operation(request: SurfaceRequest) -> Result<SurfaceResponse,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ModelsRequest {
     task: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FaceEmbedRequest {
     #[serde(default)]
     image: Option<ImagePayload>,
@@ -166,10 +226,12 @@ struct FaceEmbedRequest {
     model_root: Option<String>,
     #[serde(default)]
     region: Option<BoxRequest>,
+    #[serde(default)]
+    landmarks: Option<Vec<[f32; 2]>>,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ValidateRequest {
     #[serde(default = "default_kind")]
     kind: String,
@@ -181,7 +243,7 @@ struct ValidateRequest {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct BoxRequest {
     x: u32,
     y: u32,
@@ -226,6 +288,7 @@ fn face_embed_value(request: FaceEmbedRequest) -> Result<serde_json::Value, Stri
             "unsupported face embedding model `{model}`; expected `{DEFAULT_FACE_EMBEDDING_MODEL}`"
         ));
     }
+    validate_face_landmark_request(request.region.as_ref(), request.landmarks.as_deref())?;
 
     let auto_download = request.auto_download.unwrap_or(false);
     let spec = FaceEmbeddingPreset::OpenCvSFace.model_spec();
@@ -244,10 +307,12 @@ fn face_embed_value(request: FaceEmbedRequest) -> Result<serde_json::Value, Stri
 
     let embedding = if let Some(image) = request.image {
         let view = image.view().map_err(|error| error.to_string())?;
-        let detection = request
-            .region
-            .map(|region| face_detection_for_region(region, view.width, view.height))
-            .transpose()?;
+        let detection = face_detection_for_request(
+            request.region,
+            request.landmarks.clone(),
+            view.width,
+            view.height,
+        )?;
         embedder
             .embed_face(&view, detection.as_ref())
             .map_err(|error| error.to_string())?
@@ -256,15 +321,18 @@ fn face_embed_value(request: FaceEmbedRequest) -> Result<serde_json::Value, Stri
         let image = image_analysis_io::read_image(&image_path)
             .map_err(|error| format!("failed to read face embedding image `{image_path}`: {error}"))?;
         let view = image.as_view();
-        let detection = request
-            .region
-            .map(|region| face_detection_for_region(region, view.width, view.height))
-            .transpose()?;
+        let detection = face_detection_for_request(
+            request.region,
+            request.landmarks,
+            view.width,
+            view.height,
+        )?;
         embedder
             .embed_face(&view, detection.as_ref())
             .map_err(|error| error.to_string())?
     };
 
+    let alignment = embedding.attributes.get("facePreprocessing").cloned();
     Ok(serde_json::json!({
         "executed": true,
         "nativeOnly": true,
@@ -284,8 +352,56 @@ fn face_embed_value(request: FaceEmbedRequest) -> Result<serde_json::Value, Stri
             "width": region.width,
             "height": region.height
         })),
+        "alignment": alignment,
         "attributes": embedding.attributes
     }))
+}
+
+fn validate_face_landmark_request(
+    region: Option<&BoxRequest>,
+    landmarks: Option<&[[f32; 2]]>,
+) -> Result<(), String> {
+    let Some(points) = landmarks else {
+        return Ok(());
+    };
+    if region.is_none() {
+        return Err("face embedding landmarks require a region from the same detection".to_string());
+    }
+    if points.len() != 5 {
+        return Err(format!(
+            "SFace alignment requires exactly five normalized landmarks, got {}",
+            points.len()
+        ));
+    }
+    if points
+        .iter()
+        .flatten()
+        .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
+    {
+        return Err(
+            "face embedding landmarks must be finite normalized coordinates in [0, 1]".to_string(),
+        );
+    }
+    Ok(())
+}
+
+fn face_detection_for_request(
+    region: Option<BoxRequest>,
+    landmarks: Option<Vec<[f32; 2]>>,
+    image_width: u32,
+    image_height: u32,
+) -> Result<Option<FaceDetection>, String> {
+    validate_face_landmark_request(region.as_ref(), landmarks.as_deref())?;
+    let Some(region) = region else {
+        return Ok(None);
+    };
+    let mut detection = face_detection_for_region(region, image_width, image_height)?;
+    if let Some(points) = landmarks {
+        detection = detection.landmarks(
+            FaceLandmarks::new(points).map_err(|error| error.to_string())?,
+        );
+    }
+    Ok(Some(detection))
 }
 
 fn face_detection_for_region(
@@ -423,6 +539,182 @@ mod tests {
         })
         .expect_err("unsupported model");
         assert!(error.contains("unsupported face embedding model"));
+    }
+
+    #[test]
+    fn face_embed_schema_and_parser_reject_unknown_fields() {
+        let operation = package_surface()
+            .operations
+            .into_iter()
+            .find(|operation| operation.id.as_str() == "image.embeddings.faceEmbed")
+            .expect("face embed operation");
+        assert_eq!(operation.input_schema["additionalProperties"], false);
+        assert_eq!(operation.input_schema["properties"]["landmarks"]["minItems"], 5);
+        assert_eq!(
+            operation.input_schema["properties"]["landmarks"]["items"]["items"]["minimum"],
+            serde_json::json!(0.0)
+        );
+        assert_eq!(
+            operation.input_schema["properties"]["landmarks"]["items"]["items"]["maximum"],
+            serde_json::json!(1.0)
+        );
+        assert_eq!(
+            operation.input_schema["allOf"][0]["if"]["required"],
+            serde_json::json!(["landmarks"])
+        );
+        assert_eq!(
+            operation.input_schema["allOf"][0]["then"]["required"],
+            serde_json::json!(["region"])
+        );
+
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("image.embeddings.faceEmbed"),
+            input: serde_json::json!({
+                "image": sample_image_json(),
+                "autoDowload": true
+            }),
+        })
+        .expect_err("unknown field");
+        assert!(error.contains("unknown field"));
+    }
+
+    #[test]
+    fn models_schema_matches_strict_parser() {
+        let operation = package_surface()
+            .operations
+            .into_iter()
+            .find(|operation| operation.id.as_str() == "image.embeddings.models")
+            .expect("models operation");
+        assert_eq!(operation.input_schema["additionalProperties"], false);
+        assert_eq!(operation.input_schema["properties"]["task"]["type"], "string");
+
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("image.embeddings.models"),
+            input: serde_json::json!({"task": "face-embed", "extension": true}),
+        })
+        .expect_err("unknown field");
+        assert!(error.contains("unknown field"));
+    }
+
+    fn assert_landmark_request_fails_before_bundle_resolution(
+        input: serde_json::Value,
+        expected_error: &str,
+    ) {
+        let model_root = tempfile::tempdir().expect("temporary model root");
+        let mut input = input;
+        input["image"] = sample_image_json();
+        input["modelRoot"] = serde_json::json!(model_root.path().display().to_string());
+        input["autoDownload"] = serde_json::json!(false);
+
+        let error = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("image.embeddings.faceEmbed"),
+            input,
+        })
+        .expect_err("invalid landmark request");
+        assert!(
+            error.contains(expected_error),
+            "expected {expected_error:?}, got {error:?}"
+        );
+    }
+
+    #[test]
+    fn face_embed_rejects_landmarks_without_region_before_bundle_resolution() {
+        assert_landmark_request_fails_before_bundle_resolution(
+            serde_json::json!({
+                "landmarks": [
+                    [0.3, 0.3],
+                    [0.6, 0.3],
+                    [0.45, 0.5],
+                    [0.4, 0.7],
+                    [0.6, 0.7]
+                ]
+            }),
+            "require a region",
+        );
+    }
+
+    #[test]
+    fn face_embed_rejects_wrong_landmark_count_before_bundle_resolution() {
+        assert_landmark_request_fails_before_bundle_resolution(
+            serde_json::json!({
+                "region": {"x": 0, "y": 0, "width": 1, "height": 1},
+                "landmarks": [
+                    [0.3, 0.3],
+                    [0.6, 0.3],
+                    [0.4, 0.7],
+                    [0.6, 0.7]
+                ]
+            }),
+            "exactly five",
+        );
+    }
+
+    #[test]
+    fn face_embed_rejects_out_of_range_landmarks_before_bundle_resolution() {
+        assert_landmark_request_fails_before_bundle_resolution(
+            serde_json::json!({
+                "region": {"x": 0, "y": 0, "width": 1, "height": 1},
+                "landmarks": [
+                    [0.3, 0.3],
+                    [0.6, 0.3],
+                    [1.2, 0.5],
+                    [0.4, 0.7],
+                    [0.6, 0.7]
+                ]
+            }),
+            "normalized coordinates in [0, 1]",
+        );
+    }
+
+    #[test]
+    fn face_request_attaches_exact_normalized_landmarks() {
+        let detection = face_detection_for_request(
+            Some(BoxRequest {
+                x: 20,
+                y: 10,
+                width: 80,
+                height: 60,
+            }),
+            Some(vec![
+                [0.30, 0.30],
+                [0.60, 0.30],
+                [0.45, 0.45],
+                [0.34, 0.62],
+                [0.56, 0.62],
+            ]),
+            200,
+            100,
+        )
+        .expect("request")
+        .expect("detection");
+        assert_eq!(detection.landmarks.as_ref().unwrap().points.len(), 5);
+        assert_eq!(detection.landmarks.as_ref().unwrap().points[2], [0.45, 0.45]);
+    }
+
+    #[test]
+    fn face_request_rejects_landmarks_without_region_or_wrong_count() {
+        let without_region = face_detection_for_request(
+            None,
+            Some(vec![[0.5, 0.5]; 5]),
+            100,
+            100,
+        )
+        .expect_err("landmarks need region");
+        assert!(without_region.contains("require a region"));
+
+        let wrong_count = face_detection_for_request(
+            Some(BoxRequest {
+                x: 0,
+                y: 0,
+                width: 100,
+                height: 100,
+            }),
+            Some(vec![[0.5, 0.5]; 4]),
+            100,
+            100,
+        )
+        .expect_err("five landmarks");
+        assert!(wrong_count.contains("exactly five"));
     }
 
     #[test]
