@@ -1,0 +1,347 @@
+const TRANSFORMERS_MODULE_URL =
+  "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.0";
+
+export const SAM_MODEL_ID = "Xenova/slimsam-77-uniform";
+export const OPEN_VOCAB_MODEL_ID = "Xenova/owlvit-base-patch32";
+
+export const BROWSER_VISION_MODELS = Object.freeze([
+  Object.freeze({
+    id: SAM_MODEL_ID,
+    task: "image-segmentation",
+    execution: "browser-webgpu",
+    optIn: true,
+    output: "binary-mask",
+    prompts: Object.freeze(["point", "box"]),
+  }),
+  Object.freeze({
+    id: OPEN_VOCAB_MODEL_ID,
+    task: "zero-shot-object-detection",
+    execution: "browser-webgpu-or-wasm",
+    optIn: true,
+    output: "canonical-detection-shape",
+    prompts: Object.freeze(["text"]),
+  }),
+]);
+
+let transformersPromise;
+let samRuntimePromise;
+let openVocabularyDetectorPromise;
+
+function loadTransformers() {
+  transformersPromise ??= import(TRANSFORMERS_MODULE_URL);
+  return transformersPromise;
+}
+
+export function browserVisionCapabilities() {
+  return {
+    webgpu: typeof navigator !== "undefined" && Boolean(navigator.gpu),
+    samModel: SAM_MODEL_ID,
+    openVocabularyModel: OPEN_VOCAB_MODEL_ID,
+    transformersModule: TRANSFORMERS_MODULE_URL,
+  };
+}
+
+async function loadSamRuntime() {
+  const capabilities = browserVisionCapabilities();
+  if (!capabilities.webgpu) {
+    throw new Error(
+      "Interactive SAM segmentation requires WebGPU in this browser. Native DETR remains available through the CLI/server runtime.",
+    );
+  }
+
+  samRuntimePromise ??= loadTransformers().then(async ({ SamModel, AutoProcessor, RawImage, Tensor }) => {
+    const [model, processor] = await Promise.all([
+      SamModel.from_pretrained(SAM_MODEL_ID, { dtype: "fp16", device: "webgpu" }),
+      AutoProcessor.from_pretrained(SAM_MODEL_ID),
+    ]);
+    return { model, processor, RawImage, Tensor };
+  });
+  return samRuntimePromise;
+}
+
+export async function prepareSamImage(imageUrl) {
+  if (!imageUrl) throw new Error("An image URL is required for SAM segmentation.");
+  const runtime = await loadSamRuntime();
+  const image = await runtime.RawImage.fromURL(imageUrl);
+  const processed = await runtime.processor(image);
+  const embeddings = await runtime.model.get_image_embeddings(processed);
+  return { ...runtime, image, processed, embeddings };
+}
+
+// Image-specific tensors have a shorter lifetime than the cached model runtime.
+const disposedSamSessions = new WeakSet();
+export function disposeSamImage(session) {
+  if (!session || disposedSamSessions.has(session)) return;
+  disposedSamSessions.add(session);
+  const tensors = new Set([
+    ...Object.values(session.embeddings ?? {}),
+    ...Object.values(session.processed ?? {}),
+  ]);
+  for (const tensor of tensors) {
+    if (typeof tensor?.dispose === "function") {
+      // Disposal may return a promise depending on the execution backend.
+      try { Promise.resolve(tensor.dispose()).catch(() => {}); } catch { /* best-effort cleanup */ }
+    }
+  }
+}
+
+function requireSamSession(session) {
+  if (!session?.embeddings || !session?.processed || !session?.Tensor) {
+    throw new Error("SAM image embeddings are not ready.");
+  }
+}
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, Number(value) || 0));
+}
+
+export function summarizeBinaryMask(data, width, height) {
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  let activePixels = 0;
+
+  for (let index = 0; index < data.length; index += 1) {
+    if (data[index] === 0) continue;
+    activePixels += 1;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  }
+
+  return {
+    activePixels,
+    region:
+      activePixels === 0
+        ? null
+        : {
+            x: minX,
+            y: minY,
+            width: maxX - minX + 1,
+            height: maxY - minY + 1,
+          },
+  };
+}
+
+export function scalePixelBoxToSamInput(region, originalSize, reshapedSize) {
+  const originalHeight = Number(originalSize?.[0]);
+  const originalWidth = Number(originalSize?.[1]);
+  const reshapedHeight = Number(reshapedSize?.[0]);
+  const reshapedWidth = Number(reshapedSize?.[1]);
+  if (
+    ![originalHeight, originalWidth, reshapedHeight, reshapedWidth].every(
+      (value) => Number.isFinite(value) && value > 0,
+    )
+  ) {
+    throw new Error("SAM image dimensions must be positive finite values.");
+  }
+
+  const rawX = Number(region?.x) || 0;
+  const rawY = Number(region?.y) || 0;
+  const rawWidth = Math.max(0, Number(region?.width) || 0);
+  const rawHeight = Math.max(0, Number(region?.height) || 0);
+  const x1 = clamp(rawX, 0, originalWidth);
+  const y1 = clamp(rawY, 0, originalHeight);
+  const x2 = clamp(rawX + rawWidth, 0, originalWidth);
+  const y2 = clamp(rawY + rawHeight, 0, originalHeight);
+  if (x2 <= x1 || y2 <= y1) {
+    throw new Error("SAM box prompts must have a non-zero region inside the image.");
+  }
+
+  return [
+    (x1 * reshapedWidth) / originalWidth,
+    (y1 * reshapedHeight) / originalHeight,
+    (x2 * reshapedWidth) / originalWidth,
+    (y2 * reshapedHeight) / originalHeight,
+  ];
+}
+
+export function buildSamPointPrompt(points, reshapedSize) {
+  const reshapedHeight = Number(reshapedSize?.[0]);
+  const reshapedWidth = Number(reshapedSize?.[1]);
+  if (![reshapedHeight, reshapedWidth].every((value) => Number.isFinite(value) && value > 0)) {
+    throw new Error("SAM reshaped image dimensions must be positive finite values.");
+  }
+
+  const promptPoints = Array.isArray(points) ? points : [];
+  if (promptPoints.length === 0) {
+    throw new Error("SAM point prompting requires at least one point.");
+  }
+
+  const coordinates = [];
+  const labels = [];
+  const normalizedPoints = promptPoints.map((point) => {
+    const x = clamp01(point?.x);
+    const y = clamp01(point?.y);
+    const label = point?.label === 0 ? 0 : 1;
+    coordinates.push(x * reshapedWidth, y * reshapedHeight);
+    labels.push(label);
+    return { x, y, label };
+  });
+
+  return {
+    coordinates,
+    labels,
+    normalizedPoints,
+    pointCount: normalizedPoints.length,
+  };
+}
+
+async function decodeBestSamMask(session, modelInputs, prompt) {
+  const { pred_masks: predMasks, iou_scores: iouScores } = await session.model({
+    ...session.embeddings,
+    ...modelInputs,
+  });
+  const masks = await session.processor.post_process_masks(
+    predMasks,
+    session.processed.original_sizes,
+    session.processed.reshaped_input_sizes,
+  );
+  const mask = session.RawImage.fromTensor(masks[0][0]);
+  const scores = Array.from(iouScores.data, Number);
+
+  let bestIndex = 0;
+  for (let index = 1; index < scores.length; index += 1) {
+    if (scores[index] > scores[bestIndex]) bestIndex = index;
+  }
+
+  const data = new Uint8Array(mask.width * mask.height);
+  const maskCount = scores.length;
+  for (let index = 0; index < data.length; index += 1) {
+    data[index] = mask.data[maskCount * index + bestIndex] === 1 ? 255 : 0;
+  }
+  const summary = summarizeBinaryMask(data, mask.width, mask.height);
+
+  return {
+    backend: "transformers.js-sam-webgpu",
+    modelId: SAM_MODEL_ID,
+    score: scores[bestIndex] ?? null,
+    width: mask.width,
+    height: mask.height,
+    data,
+    activePixels: summary.activePixels,
+    region: summary.region,
+    prompt,
+  };
+}
+
+export async function segmentSamPoints(session, points) {
+  requireSamSession(session);
+
+  const reshaped = session.processed.reshaped_input_sizes[0];
+  const prompt = buildSamPointPrompt(points, reshaped);
+  const inputPoints = new session.Tensor(
+    "float32",
+    prompt.coordinates,
+    [1, 1, prompt.pointCount, 2],
+  );
+  const inputLabels = new session.Tensor(
+    "int64",
+    prompt.labels.map((label) => BigInt(label)),
+    [1, 1, prompt.pointCount],
+  );
+
+  return decodeBestSamMask(
+    session,
+    { input_points: inputPoints, input_labels: inputLabels },
+    { type: "points", points: prompt.normalizedPoints },
+  );
+}
+
+export async function segmentSamPoint(session, point) {
+  const segment = await segmentSamPoints(session, [point]);
+  return {
+    ...segment,
+    prompt: { type: "point", ...segment.prompt.points[0] },
+  };
+}
+
+export async function segmentSamBox(session, region) {
+  requireSamSession(session);
+
+  const original = session.processed.original_sizes[0];
+  const reshaped = session.processed.reshaped_input_sizes[0];
+  const box = scalePixelBoxToSamInput(region, original, reshaped);
+  const inputBoxes = new session.Tensor("float32", box, [1, 1, 4]);
+
+  // Transformers.js' SAM forward path derives default point labels from
+  // input_points before passing optional boxes to the decoder. A single padding
+  // point keeps the box-only prompt explicit without contributing a foreground
+  // or background point to the prompt encoder.
+  const inputPoints = new session.Tensor("float32", [0, 0], [1, 1, 1, 2]);
+  const inputLabels = new session.Tensor("int64", [BigInt(-10)], [1, 1, 1]);
+
+  return decodeBestSamMask(
+    session,
+    {
+      input_points: inputPoints,
+      input_labels: inputLabels,
+      input_boxes: inputBoxes,
+    },
+    {
+      type: "box",
+      region: {
+        x: Math.round(Number(region?.x) || 0),
+        y: Math.round(Number(region?.y) || 0),
+        width: Math.round(Number(region?.width) || 0),
+        height: Math.round(Number(region?.height) || 0),
+      },
+    },
+  );
+}
+
+export function normalizeOpenVocabularyDetection(detection) {
+  const xmin = Math.max(0, Math.round(detection?.box?.xmin ?? 0));
+  const ymin = Math.max(0, Math.round(detection?.box?.ymin ?? 0));
+  const xmax = Math.max(xmin, Math.round(detection?.box?.xmax ?? xmin));
+  const ymax = Math.max(ymin, Math.round(detection?.box?.ymax ?? ymin));
+  return {
+    label: String(detection?.label ?? "object"),
+    score: Number(detection?.score ?? 0),
+    region: {
+      x: xmin,
+      y: ymin,
+      width: xmax - xmin,
+      height: ymax - ymin,
+    },
+    attributes: {
+      backend: "transformers.js-zero-shot-object-detection",
+      modelId: OPEN_VOCAB_MODEL_ID,
+      promptKind: "text",
+    },
+  };
+}
+
+export async function detectOpenVocabulary(imageUrl, labels, options = {}) {
+  if (!imageUrl) throw new Error("An image URL is required for object detection.");
+  const candidateLabels = Array.from(
+    new Set((labels ?? []).map((label) => String(label).trim()).filter(Boolean)),
+  );
+  if (candidateLabels.length === 0) {
+    throw new Error("Enter at least one concept to detect.");
+  }
+
+  const threshold = Number.isFinite(options.threshold) ? options.threshold : 0.08;
+  const topK = Number.isInteger(options.topK) ? Math.max(1, options.topK) : 20;
+  const { pipeline } = await loadTransformers();
+  openVocabularyDetectorPromise ??= pipeline(
+    "zero-shot-object-detection",
+    OPEN_VOCAB_MODEL_ID,
+    browserVisionCapabilities().webgpu ? { device: "webgpu" } : {},
+  );
+  const detector = await openVocabularyDetectorPromise;
+  const detections = await detector(imageUrl, candidateLabels, {
+    threshold,
+    top_k: topK,
+  });
+
+  return detections.map(normalizeOpenVocabularyDetection);
+}

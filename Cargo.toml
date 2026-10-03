@@ -44,6 +44,7 @@ model-runtime = { package = "moenarch-model-runtime", version = "=0.1.1" }
 numbers-core = { package = "moenarch-numbers-core", version = "=0.1.1" }
 runtime-core = { package = "moenarch-runtime-core", version = "=0.2.1" }
 runtime-onnx = { package = "moenarch-runtime-onnx", version = "=0.1.1" }
+semantic-core = { package = "moenarch-semantic-core", version = "=0.1.0" }
 scenedetect-core = { version = "=0.1.0" }
 tensor-data = { package = "moenarch-tensor-data", version = "=0.1.1" }
 text-core = { package = "moenarch-text-core", version = "=0.1.1" }

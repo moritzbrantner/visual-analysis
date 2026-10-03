@@ -15,8 +15,18 @@ categories.workspace = true
 [lib]
 name = "video_analysis_ingest"
 
+[features]
+default = []
+ocr = ["dep:image-analysis-ocr", "dep:video-analysis-recognition", "video-analysis-recognition/ocr"]
+
 [dependencies]
+video-analysis-detectors.workspace = true
+image-analysis-ocr = { workspace = true, optional = true }
+video-analysis-recognition = { workspace = true, optional = true }
 runtime-core.workspace = true
 serde_json.workspace = true
 num-rational.workspace = true
 video-analysis-core.workspace = true
+
+[dev-dependencies]
+image-analysis-core.workspace = true

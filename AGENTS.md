@@ -23,6 +23,22 @@ Read `CONTEXT.md`, `docs/PROVENANCE.md`, `docs/OWNERSHIP.md`, `docs/SOURCE_DEVEL
 - Never publish, tag, release, remove monolith source, or merge the bootstrap without a separate exact authorization.
 - Registry-only dependency verification is release evidence; it is not required before exact source-mode implementation evidence is useful.
 
+## Post-bootstrap regression maintenance
+
+The 2026-09-23 maintainer audit-repair request explicitly authorizes behavioral
+regression tests, benchmarks, browser checks, and integration of validated repairs.
+The structural-only rules below apply to the completed extraction bootstrap, not
+to subsequent feature or audit repairs. Preserve the structural ownership checks.
+
+For the video audit scope, run `bash scripts/check-audit-regressions.sh` after
+activating the declared Foundation source graph. Browser request-isolation tests
+run with `python tests/browser/vision_races.py` (Playwright 1.57.0 and Chromium).
+Keep model downloads out of deterministic tests; native ONNX/model acceptance
+remains a separate opt-in gate. Wall-clock benchmark comparisons are evidence,
+not a portable pass/fail threshold. Allocation, lifetime, output, and work-count
+assertions are blocking regression fences. The draft Harness is not promoted by
+this maintenance policy.
+
 ## Bootstrap verification policy
 
 Issue #2 explicitly authorizes structural verification only. Do not run or

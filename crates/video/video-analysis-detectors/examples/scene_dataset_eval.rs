@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use video_analysis_core::{DetectError, OwnedVideoFrame, VideoSource};
+use video_analysis_detectors::detect_source;
 use video_analysis_ffmpeg::FfmpegVideoSource;
-use video_analysis_ingest::VideoFrameSource;
 
 mod scene_dataset_eval_support;
 use scene_dataset_eval_support::{
@@ -244,45 +245,27 @@ fn detect_video(
     let video_started = Instant::now();
     let options = ffmpeg_options_from_args(args);
     let mut source = FfmpegVideoSource::open_path_with_options(path, options)?;
-    let mut detector = detector_from_args(args)?;
-    let mut cuts = Vec::new();
-    let mut last_position = None;
-    let mut decode_resize_elapsed = Duration::ZERO;
-    let mut detector_elapsed = Duration::ZERO;
-    let mut frame_count = 0_u64;
-    loop {
-        let decode_started = Instant::now();
-        let frame = source.next_video_frame()?;
-        decode_resize_elapsed += decode_started.elapsed();
-        let Some(frame) = frame else {
-            break;
-        };
-        if runtime_exceeded(started, max_runtime) {
-            return Err(runtime_error(max_runtime));
-        }
-        frame_count += 1;
-        last_position = Some(frame.position);
-        let detector_started = Instant::now();
-        cuts.extend(
-            detector
-                .process_frame(&frame.as_frame(), None)?
-                .into_iter()
-                .map(|cut| cut.position.frame_index),
-        );
-        detector_elapsed += detector_started.elapsed();
-    }
-    if let Some(last_position) = last_position {
-        let detector_started = Instant::now();
-        cuts.extend(
-            detector
-                .finish(last_position, None)?
-                .into_iter()
-                .map(|cut| cut.position.frame_index),
-        );
-        detector_elapsed += detector_started.elapsed();
-    }
-    cuts.sort_unstable();
-    cuts.dedup();
+    let (detector, detection_options) = detector_from_args(args)?;
+    let mut timed = TimedSource {
+        source: &mut source,
+        started,
+        max_runtime,
+        decode_elapsed: Duration::ZERO,
+        frame_count: 0,
+    };
+    let detection_started = Instant::now();
+    let result = detect_source(&mut timed, detector, detection_options)?;
+    let total_detection_elapsed = detection_started.elapsed();
+    let decode_resize_elapsed = timed.decode_elapsed;
+    let detector_elapsed = total_detection_elapsed.saturating_sub(decode_resize_elapsed);
+    let frame_count = timed.frame_count;
+    let cuts = result
+        .scene_list
+        .scenes
+        .iter()
+        .skip(1)
+        .map(|scene| scene.start.0)
+        .collect();
     let cuts = suppress_nearby_cuts(cuts, args.config.post_filter_window);
     let elapsed_ms = video_started.elapsed().as_secs_f64() * 1000.0;
     Ok(DetectionReport {
@@ -297,6 +280,31 @@ fn detect_video(
             0.0
         },
     })
+}
+
+struct TimedSource<'a> {
+    source: &'a mut FfmpegVideoSource,
+    started: Instant,
+    max_runtime: Option<Duration>,
+    decode_elapsed: Duration,
+    frame_count: u64,
+}
+impl VideoSource for &mut TimedSource<'_> {
+    fn frame_rate(&self) -> num_rational::Rational64 {
+        self.source.frame_rate()
+    }
+    fn next_frame(&mut self) -> video_analysis_core::Result<Option<OwnedVideoFrame>> {
+        if runtime_exceeded(self.started, self.max_runtime) {
+            return Err(DetectError::Source(
+                runtime_error(self.max_runtime).to_string(),
+            ));
+        }
+        let started = Instant::now();
+        let frame = self.source.next_frame()?;
+        self.decode_elapsed += started.elapsed();
+        self.frame_count += u64::from(frame.is_some());
+        Ok(frame)
+    }
 }
 
 fn runtime_exceeded(started: Instant, max_runtime: Option<Duration>) -> bool {

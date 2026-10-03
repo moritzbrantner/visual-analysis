@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OUTPUT_DIR="${1:-$ROOT_DIR/_site}"
+
+for command in wasm-pack node; do
+  if ! command -v "$command" >/dev/null 2>&1; then
+    printf '%s is required to build Visual Inspector.\n' "$command" >&2
+    exit 2
+  fi
+done
+
+bash "$ROOT_DIR/packages/image-analysis-core-wasm/scripts/build-wasm.sh"
+bash "$ROOT_DIR/packages/image-analysis-processing-wasm/scripts/build-wasm.sh"
+
+node --check "$ROOT_DIR/site/analysis.js"
+node --check "$ROOT_DIR/site/app.js"
+
+rm -rf "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR/wasm"
+cp -R "$ROOT_DIR/site/." "$OUTPUT_DIR/"
+
+write_pages_wasm_adapter() {
+  local package="$1"
+  local source_root="$ROOT_DIR/packages/${package}-wasm"
+  local target_root="$OUTPUT_DIR/wasm/$package"
+  local candidate
+  local wasm_entries=()
+
+  mkdir -p "$target_root"
+  cp -R "$source_root/pkg" "$target_root/pkg"
+
+  for candidate in "$source_root"/pkg/*_wasm.js; do
+    [[ -f "$candidate" ]] || continue
+    wasm_entries+=("$(basename "$candidate")")
+  done
+
+  if [[ ${#wasm_entries[@]} -ne 1 ]]; then
+    printf 'expected exactly one generated *_wasm.js entry for %s, found %s\n' "$package" "${#wasm_entries[@]}" >&2
+    exit 1
+  fi
+
+  cat > "$target_root/index.js" <<ADAPTER
+let wasmModulePromise;
+
+function toPlainValue(value) {
+  if (value instanceof Map) {
+    return Object.fromEntries(Array.from(value, ([key, nested]) => [String(key), toPlainValue(nested)]));
+  }
+  if (Array.isArray(value)) {
+    return value.map((nested) => toPlainValue(nested));
+  }
+  if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+    return Array.from(value);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, toPlainValue(nested)]));
+  }
+  return value;
+}
+
+export async function init() {
+  const wasmEntry = "./pkg/${wasm_entries[0]}";
+  wasmModulePromise ??= import(wasmEntry).then(async (module) => {
+    if (typeof module.default === "function") await module.default();
+    return module;
+  });
+  return wasmModulePromise;
+}
+
+export async function packageSurface() {
+  const module = await init();
+  return toPlainValue(await module.packageSurface());
+}
+
+export async function runOperation(request) {
+  const module = await init();
+  return toPlainValue(await module.runOperation(request));
+}
+ADAPTER
+}
+
+write_pages_wasm_adapter image-analysis-core
+write_pages_wasm_adapter image-analysis-processing
+
+touch "$OUTPUT_DIR/.nojekyll"
+printf 'Visual Inspector Pages artifact: %s\n' "$OUTPUT_DIR"

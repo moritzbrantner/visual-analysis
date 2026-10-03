@@ -19,10 +19,12 @@ name = "video_analysis_recognition"
 runtime-core.workspace = true
 base64.workspace = true
 model-runtime.workspace = true
+semantic-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 image-analysis-core.workspace = true
 image-analysis-detection = { workspace = true, optional = true }
+image-analysis-ocr = { workspace = true, optional = true }
 runtime-onnx.workspace = true
 video-analysis-core.workspace = true
 vision-core.workspace = true
@@ -30,6 +32,13 @@ vision-core.workspace = true
 [features]
 default = []
 onnx = ["dep:image-analysis-detection", "image-analysis-detection/onnx"]
+ocr = ["dep:image-analysis-ocr"]
 
 [dev-dependencies]
 num-rational.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "text_regressions"
+harness = false
+required-features = ["ocr"]

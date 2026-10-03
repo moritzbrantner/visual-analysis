@@ -9,7 +9,7 @@ use video_analysis_core::BoundingBox;
 
 use crate::{
     default_sam_model_spec, BinaryMask, ImageSegmentationPrompt, ImageSegmentationRequest,
-    SegmentationPoint,
+    SamImagePreset, SegmentationPoint,
 };
 
 /// Returns the package surface exposed by every transport wrapper.
@@ -29,6 +29,12 @@ pub fn package_surface() -> PackageSurface {
                 "image.segmentation.model",
                 "SAM model",
                 "Returns the default SAM model spec without downloading or running SAM.",
+                serde_json::json!({}),
+            ),
+            operation(
+                "image.segmentation.models",
+                "SAM model catalog",
+                "Returns every canonical SAM preset plus its prompt/output contract without downloading or running a model.",
                 serde_json::json!({}),
             ),
             operation(
@@ -73,13 +79,14 @@ pub fn run_surface_operation(request: SurfaceRequest) -> Result<SurfaceResponse,
     let value = match request.operation.as_str() {
         "describe" => return Ok(describe_surface_response(&surface, request)),
         "image.segmentation.model" => model_value(),
+        "image.segmentation.models" => models_value(),
         "image.segmentation.promptSummary" => prompt_summary_value(parse_input(request.input)?)?,
         "image.segmentation.maskSummary" => mask_summary_value(parse_input(request.input)?)?,
         operation => {
             return Err(format!(
                 "unsupported operation `{operation}` for {}",
                 env!("CARGO_PKG_NAME")
-            ));
+            ))
         }
     };
     Ok(structured_operation_response(&surface, operation, value))
@@ -153,6 +160,40 @@ fn model_value() -> serde_json::Value {
             "revision": spec.revision_value(),
             "task": spec.task.as_protocol_str(),
             "files": spec.files
+        }
+    })
+}
+
+fn models_value() -> serde_json::Value {
+    let default = SamImagePreset::default();
+    let models = SamImagePreset::ALL
+        .iter()
+        .copied()
+        .map(|preset| {
+            let spec = preset.model_spec();
+            serde_json::json!({
+                "id": preset.as_str(),
+                "name": spec.name,
+                "repoId": spec.repo_id_value(),
+                "revision": spec.revision_value(),
+                "task": spec.task.as_protocol_str(),
+                "files": spec.files,
+                "default": preset == default,
+                "executionStatus": "model-spec-only",
+                "requiresBackend": true,
+                "downloadPolicy": "no-download-from-metadata-surface",
+                "requestModes": ["point", "box", "automatic-mask-generation"],
+                "multimaskOutput": true,
+                "canonicalOutput": "ImageSegment"
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "models": models,
+        "execution": {
+            "implementedByThisPackage": false,
+            "backendContract": "ImageSegmentationBackend",
+            "modelExecutionOperation": null
         }
     })
 }
@@ -245,7 +286,31 @@ mod tests {
             .map(|operation| operation.id.0)
             .collect::<Vec<_>>();
         assert!(ids.contains(&"image.segmentation.model".to_string()));
+        assert!(ids.contains(&"image.segmentation.models".to_string()));
         assert!(ids.contains(&"image.segmentation.maskSummary".to_string()));
+    }
+
+    #[test]
+    fn model_catalog_is_explicit_about_presets_and_missing_execution_backend() {
+        let response = run_surface_operation(SurfaceRequest {
+            operation: OperationId::new("image.segmentation.models"),
+            input: serde_json::json!({}),
+        })
+        .expect("model catalog");
+        let models = response.value["models"].as_array().expect("models array");
+        assert_eq!(models.len(), SamImagePreset::ALL.len());
+        assert_eq!(models[0]["id"], "sam-vit-base");
+        assert_eq!(models[1]["id"], "sam-vit-large");
+        assert_eq!(models[2]["id"], "sam-vit-huge");
+        assert_eq!(models[0]["default"], true);
+        assert!(models
+            .iter()
+            .all(|model| model["executionStatus"] == "model-spec-only"));
+        assert_eq!(response.value["execution"]["implementedByThisPackage"], false);
+        assert_eq!(
+            response.value["execution"]["backendContract"],
+            "ImageSegmentationBackend"
+        );
     }
 
     #[test]

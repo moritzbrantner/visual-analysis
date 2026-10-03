@@ -10,8 +10,7 @@ use video_analysis_core::{
     AudioAnalysis, AudioAnalysisResult, AudioPipeline, AudioSampleFormat, DetectionResult,
     FrameAnalysis, OwnedAudioFrame, OwnedTextSegment, OwnedVideoFrame, PixelFormat,
     RealtimeVideoAnalysisResult, RealtimeVideoFrameAnalysis, RealtimeVideoPipeline, Result,
-    ScenePipeline, TextAnalysis, TextAnalysisResult, TextPipeline, VideoAnalysisPipeline,
-    VideoAnalysisResult, VideoFrameAnalysis,
+    ScenePipeline, VideoAnalysisPipeline, VideoAnalysisResult, VideoFrameAnalysis,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -270,24 +269,6 @@ where
     while let Some(frame) = source.next_audio_frame()? {
         let analysis = pipeline.process_frame(frame)?;
         on_frame(&analysis)?;
-    }
-    pipeline.finish_analysis()
-}
-
-/// Returns analyze text source.
-pub fn analyze_text_source<S, F>(
-    source: &mut S,
-    pipeline: &mut TextPipeline,
-    mut on_segment: F,
-) -> Result<TextAnalysisResult>
-where
-    S: TextSegmentSource,
-    F: FnMut(&TextAnalysis) -> Result<()>,
-{
-    pipeline.reset();
-    while let Some(segment) = source.next_text_segment()? {
-        let analysis = pipeline.process_segment(segment)?;
-        on_segment(&analysis)?;
     }
     pipeline.finish_analysis()
 }

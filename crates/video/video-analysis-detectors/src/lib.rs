@@ -3,10 +3,12 @@
 pub mod canonical;
 pub mod surface;
 
-pub use canonical::{analyze_content_source, CanonicalContentAnalysis};
+pub use canonical::{analyze_content_source, detect_source, CanonicalContentAnalysis};
 pub use scenedetect_core::{
-    AdaptiveDetectorConfig as AdaptiveDetector, DetectorConfig, HashDetectorConfig as HashDetector,
-    HistogramDetectorConfig as HistogramDetector, ThresholdDetectorConfig as ThresholdDetector,
+    AdaptiveDetectorConfig as AdaptiveDetector, BoundaryReviewOptions, ContentDetectorConfig,
+    DetectionOptions, DetectorConfig, HashDetectorConfig as HashDetector,
+    HistogramDetectorConfig as HistogramDetector, MinSceneLenPolicy,
+    ThresholdDetectorConfig as ThresholdDetector,
 };
 pub use video_analysis_core::{ContentDetector, ContentWeights, FlashFilterMode};
 

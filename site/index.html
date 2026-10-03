@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Inspect images and videos locally in your browser with visual-analysis Rust/WASM packages."
+    />
+    <title>Visual Inspector · visual-analysis</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div class="eyebrow">visual-analysis · browser lab</div>
+        <h1>Inspect visual media without uploading it.</h1>
+        <p class="hero-copy">
+          Drop an image or video. Visual Inspector decodes it locally, runs deterministic image statistics and
+          perceptual hashing through the repository's Rust/WASM packages, and turns the result into an explorable
+          report.
+        </p>
+        <div class="runtime-strip" aria-label="privacy and runtime summary">
+          <span class="status-dot" aria-hidden="true"></span>
+          <strong>Local by default</strong>
+          <span>Selected media stays in this browser on GitHub Pages.</span>
+          <span id="runtime-summary" class="runtime-secondary">Rust/WASM loads when analysis begins.</span>
+        </div>
+      </header>
+
+      <section id="input-panel" class="panel input-panel" aria-labelledby="input-title">
+        <div id="drop-zone" class="drop-zone">
+          <input id="file-input" class="visually-hidden" type="file" accept="image/*,video/*" />
+          <div class="drop-icon" aria-hidden="true">◫</div>
+          <h2 id="input-title">Inspect an image or video</h2>
+          <p>Drop media here, or choose a file from your device.</p>
+          <button id="choose-file" class="button button-primary" type="button">Choose visual media</button>
+          <p class="drop-note">Images are analyzed directly. Videos use a bounded set of browser-decoded frames.</p>
+        </div>
+
+        <div class="example-block" aria-labelledby="examples-title">
+          <div>
+            <div class="eyebrow">no file handy?</div>
+            <h2 id="examples-title">Try a generated example</h2>
+          </div>
+          <div class="example-grid">
+            <button class="example-card" type="button" data-example="gradient">
+              <span class="example-title">Color gradient</span>
+              <span class="example-expectation">Broad luma range · mixed mean color</span>
+            </button>
+            <button class="example-card" type="button" data-example="checkerboard">
+              <span class="example-title">High-contrast checkerboard</span>
+              <span class="example-expectation">Strong tonal separation · stable deterministic hash</span>
+            </button>
+          </div>
+        </div>
+        <p id="input-error" class="error-message" hidden role="alert"></p>
+      </section>
+
+      <section id="loading-panel" class="panel loading-panel" hidden aria-live="polite" aria-atomic="true">
+        <div class="spinner" aria-hidden="true"></div>
+        <div>
+          <strong id="loading-title">Analyzing visual media…</strong>
+          <p id="loading-detail">Loading Rust/WASM and preparing a bounded pixel buffer.</p>
+          <ol class="progress-steps" aria-label="analysis progress">
+            <li id="progress-decode">Decode</li>
+            <li id="progress-analyze">Analyze</li>
+            <li id="progress-report">Report</li>
+          </ol>
+        </div>
+      </section>
+
+      <section id="report" hidden aria-labelledby="report-title">
+        <div class="report-toolbar">
+          <div>
+            <div class="eyebrow">analysis report</div>
+            <h2 id="report-title" tabindex="-1">Visual media</h2>
+          </div>
+          <div class="toolbar-actions">
+            <button id="export-json" class="button button-primary" type="button">Download JSON</button>
+            <button id="choose-another" class="button button-secondary" type="button">Analyze another file</button>
+          </div>
+        </div>
+
+        <nav class="report-nav" aria-label="Report sections">
+          <a href="#overview">Overview</a>
+          <a href="#preview-section">Preview</a>
+          <a href="#luma-section">Luma</a>
+          <a id="timeline-nav" href="#timeline-section">Timeline</a>
+          <a href="#capabilities">Capabilities</a>
+          <a href="#technical">Technical</a>
+        </nav>
+
+        <section id="overview" class="report-section">
+          <div class="summary-grid">
+            <article class="summary-card"><span>Media</span><strong id="summary-kind">—</strong></article>
+            <article class="summary-card"><span>Dimensions</span><strong id="summary-dimensions">—</strong></article>
+            <article class="summary-card"><span>Analyzed</span><strong id="summary-analyzed">—</strong></article>
+            <article class="summary-card"><span>Mean color</span><strong id="summary-color">—</strong></article>
+            <article class="summary-card"><span>Mean luma</span><strong id="summary-luma">—</strong></article>
+            <article class="summary-card"><span>Perceptual hash</span><strong id="summary-hash">—</strong></article>
+          </div>
+
+          <section class="panel findings-panel">
+            <div class="section-heading">
+              <div>
+                <div class="eyebrow">what stands out</div>
+                <h2>Key findings</h2>
+              </div>
+              <span id="coverage-badge" class="badge">bounded local scan</span>
+            </div>
+            <div id="findings" class="findings"></div>
+          </section>
+        </section>
+
+        <section id="preview-section" class="panel report-section">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">source media</div>
+              <h2>Preview</h2>
+            </div>
+            <span id="file-meta" class="badge">—</span>
+          </div>
+          <div class="preview-frame">
+            <img id="preview-image" alt="Analyzed image preview" hidden />
+            <video id="preview-video" controls preload="metadata" hidden></video>
+          </div>
+          <p id="preview-note" class="figure-note"></p>
+        </section>
+
+        <section id="luma-section" class="panel report-section">
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">rust image core</div>
+              <h2>Luma histogram</h2>
+            </div>
+            <span class="badge">32 bins · WASM</span>
+          </div>
+          <canvas id="histogram" class="visualization" role="img" aria-label="Luma histogram"></canvas>
+          <div id="histogram-readout" class="mini-metrics"></div>
+          <p class="figure-note">
+            Computed by <code>image.core.lumaHistogram</code> from the bounded RGB24 buffer shown in Technical details.
+          </p>
+        </section>
+
+        <section id="timeline-section" class="panel report-section" hidden>
+          <div class="section-heading">
+            <div>
+              <div class="eyebrow">video sampling</div>
+              <h2>Brightness timeline</h2>
+            </div>
+            <span id="timeline-badge" class="badge">sampled frames</span>
+          </div>
+          <canvas id="timeline" class="visualization" role="img" aria-label="Sampled video brightness timeline"></canvas>
+          <p class="figure-note">
+            Frames are decoded by the browser at evenly spaced timestamps, then analyzed by the same Rust image core.
+            This is bounded sampling, not a claim of full frame-by-frame video coverage.
+          </p>
+        </section>
+
+        <section id="capabilities" class="report-section">
+          <div class="section-heading section-heading-standalone">
+            <div>
+              <div class="eyebrow">repository surface</div>
+              <h2>What visual-analysis owns</h2>
+            </div>
+          </div>
+          <div class="capability-grid">
+            <article class="capability-card">
+              <span class="capability-status capability-status-live">Runs here</span>
+              <h3>Image core</h3>
+              <p>Dimensions, pixel formats, mean RGB, luma histograms, and mask-tensor summaries.</p>
+            </article>
+            <article class="capability-card">
+              <span class="capability-status capability-status-live">Runs here</span>
+              <h3>Image processing</h3>
+              <p>Deterministic CPU transforms and perceptual hashing. This page uses the hash surface directly.</p>
+            </article>
+            <article class="capability-card">
+              <span class="capability-status">Contracts & adapters</span>
+              <h3>Detection & segmentation</h3>
+              <p>Canonical visual detection, mask, and prompt contracts live here; renderer or model execution is not fabricated by this static page.</p>
+            </article>
+            <article class="capability-card">
+              <span class="capability-status">Contracts & adapters</span>
+              <h3>Classification, captioning & OCR</h3>
+              <p>Model catalogs, task schemas, OCR composition, and backend contracts remain available through their package surfaces.</p>
+            </article>
+            <article class="capability-card">
+              <span class="capability-status">Non-spatial video</span>
+              <h3>Video workflows</h3>
+              <p>Ingest, features, tracking, editing, data, output, storage, and related non-spatial video orchestration stay in visual-analysis.</p>
+            </article>
+            <article class="capability-card">
+              <span class="capability-status">External authority</span>
+              <h3>Scene detection</h3>
+              <p>Shared scene algorithms stay canonical in scenedetect-rs; visual-analysis integrates them through explicit adapters rather than copying them.</p>
+              <a href="https://moritzbrantner.github.io/scenedetect-rs/">Open SceneDetect browser lab</a>
+            </article>
+          </div>
+        </section>
+
+        <details id="technical" class="panel technical-panel report-section">
+          <summary>
+            <span>
+              <span class="eyebrow">progressive disclosure</span>
+              <strong>Technical details</strong>
+            </span>
+            <span>Runtime, sampling coverage, operation IDs and raw JSON</span>
+          </summary>
+          <div class="technical-content">
+            <dl id="technical-metrics" class="metric-list"></dl>
+            <div>
+              <h3>Raw analysis report</h3>
+              <pre id="raw-json" class="raw-json"></pre>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <footer class="footer">
+        <span>visual-analysis</span>
+        <a href="https://github.com/moritzbrantner/visual-analysis">Source on GitHub</a>
+      </footer>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

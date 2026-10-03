@@ -11,8 +11,6 @@ audio-tools/
 test-corpora/
 .video-analysis-models/
 .model-runtime/
-.agent-loop/
-/.agent-loop/verification/
 .env
 .env.*
 !.env.example
@@ -44,3 +42,6 @@ use-case-output/**/*.wav
 use-case-output/**/*.flac
 use-case-output/**/*.ogg
 use-case-output/**/*.mp3
+
+# Generated regression and benchmark evidence
+.artifacts/
