@@ -1028,6 +1028,8 @@ impl OnnxTrOcrBackend {
                 })?;
             resolve_trocr_token_ids(&mut options, &tokenizer, &info)?;
             validate_trocr_options(&options)?;
+            // The early return is required while the registry-path tail below exists without this feature.
+            #[allow(clippy::needless_return)]
             return Ok(Self {
                 spec: bundle_spec(&bundle),
                 options,
@@ -1420,7 +1422,7 @@ fn run_trocr_encoder(
         }])
         .map_err(runtime_onnx_error)?;
     runtime_onnx::first_f32_output(&outputs)
-        .map(Clone::clone)
+        .cloned()
         .map_err(runtime_onnx_error)
         .and_then(|tensor| {
             validate_encoder_hidden_states(&tensor)?;

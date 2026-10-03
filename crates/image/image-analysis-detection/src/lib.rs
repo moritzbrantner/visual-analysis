@@ -1442,7 +1442,7 @@ fn decode_yunet_2023_tensors(
 ) -> Result<Vec<FaceDetection>> {
     let width = options.preprocessing.input_width;
     let height = options.preprocessing.input_height;
-    if width == 0 || height == 0 || width % 32 != 0 || height % 32 != 0 {
+    if width == 0 || height == 0 || !width.is_multiple_of(32) || !height.is_multiple_of(32) {
         return Err(DetectError::InvalidArgument(
             "YuNet 2023 input dimensions must be positive multiples of 32".to_string(),
         ));
