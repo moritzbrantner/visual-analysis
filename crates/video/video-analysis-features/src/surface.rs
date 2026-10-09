@@ -264,8 +264,6 @@ fn record_timestamp_seconds(record: &DatasetRecord) -> Option<f64> {
         DatasetRecord::Metric(_) => None,
         DatasetRecord::Feature(record) => record.timestamp.map(|timestamp| timestamp.seconds),
         DatasetRecord::Track(record) => record.first_timestamp.map(|timestamp| timestamp.seconds),
-        DatasetRecord::Pose2d(record) => record.frame.map(|frame| frame.timestamp.seconds),
-        DatasetRecord::Pose3d(record) => record.frame.map(|frame| frame.timestamp.seconds),
     }
 }
 

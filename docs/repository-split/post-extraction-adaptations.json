@@ -26,18 +26,23 @@
     "crates/image/image-analysis-segmentation/README.md",
     "crates/image/image-analysis-segmentation/src/lib.rs",
     "crates/image/image-analysis-segmentation/src/surface.rs",
+    "crates/video/video-analysis-dataset/src/lib.rs",
+    "crates/video/video-analysis-dataset/src/surface.rs",
     "crates/video/video-analysis-detectors/benches/scene_detectors.rs",
     "crates/video/video-analysis-detectors/examples/detector_benchmark.rs",
     "crates/video/video-analysis-detectors/examples/scene_dataset_eval.rs",
     "crates/video/video-analysis-detectors/examples/scene_dataset_eval_support/mod.rs",
     "crates/video/video-analysis-detectors/examples/scene_detector_real_frame_benchmark.rs",
     "crates/video/video-analysis-detectors/tests/pyscenedetect_detector_parity.rs",
+    "crates/video/video-analysis-features/src/surface.rs",
     "crates/video/video-analysis-ffmpeg/src/lib.rs",
     "crates/video/video-analysis-ingest/Cargo.toml",
     "crates/video/video-analysis-ingest/src/lib.rs",
     "crates/video/video-analysis-ingest/src/surface.rs",
     "crates/video/video-analysis-recognition/src/lib.rs",
     "crates/video/video-analysis-recognition/src/model_analyzers.rs",
-    "crates/video/video-analysis-recognition/src/model_predictions.rs"
+    "crates/video/video-analysis-recognition/src/model_predictions.rs",
+    "crates/video/video-analysis-transform/src/lib.rs",
+    "crates/video/video-analysis-transform/src/surface.rs"
   ]
 }

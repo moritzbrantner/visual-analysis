@@ -53,8 +53,6 @@ pub fn record_timestamp_seconds(record: &DatasetRecord) -> Option<f64> {
         DatasetRecord::Metric(_) => None,
         DatasetRecord::Feature(record) => record.timestamp.map(|timestamp| timestamp.seconds),
         DatasetRecord::Track(record) => record.first_timestamp.map(|timestamp| timestamp.seconds),
-        DatasetRecord::Pose2d(record) => record.frame.map(|frame| frame.timestamp.seconds),
-        DatasetRecord::Pose3d(record) => record.frame.map(|frame| frame.timestamp.seconds),
     }
 }
 
@@ -71,8 +69,6 @@ pub fn record_frame_index(record: &DatasetRecord) -> Option<u64> {
         DatasetRecord::Metric(record) => Some(record.frame_index),
         DatasetRecord::Feature(record) => record.frame_index,
         DatasetRecord::Track(record) => record.first_frame,
-        DatasetRecord::Pose2d(record) => record.frame.map(|frame| frame.frame_index),
-        DatasetRecord::Pose3d(record) => record.frame.map(|frame| frame.frame_index),
     }
 }
 
@@ -361,14 +357,6 @@ pub fn record_identity_key(record: &DatasetRecord) -> Option<String> {
             record.name, record.scope, record.timestamp, record.frame_index, record.scene_index
         )),
         DatasetRecord::Track(record) => Some(format!("track:{}", record.track_id)),
-        DatasetRecord::Pose2d(record) => Some(format!(
-            "pose2d:{}:{:?}:{:?}:{:?}",
-            record.analyzer, record.id, record.label, record.frame
-        )),
-        DatasetRecord::Pose3d(record) => Some(format!(
-            "pose3d:{}:{:?}:{:?}:{:?}",
-            record.analyzer, record.id, record.label, record.frame
-        )),
     }
 }
 
