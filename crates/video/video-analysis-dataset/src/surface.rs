@@ -237,8 +237,6 @@ fn record_timestamp_seconds(record: &DatasetRecord) -> Option<f64> {
         DatasetRecord::Metric(_) => None,
         DatasetRecord::Feature(record) => record.timestamp.map(|timestamp| timestamp.seconds),
         DatasetRecord::Track(record) => record.first_timestamp.map(|timestamp| timestamp.seconds),
-        DatasetRecord::Pose2d(record) => record.frame.map(|frame| frame.timestamp.seconds),
-        DatasetRecord::Pose3d(record) => record.frame.map(|frame| frame.timestamp.seconds),
     }
 }
 
@@ -259,8 +257,6 @@ fn record_frame_index(record: &DatasetRecord) -> Option<u64> {
         DatasetRecord::Metric(record) => Some(record.frame_index),
         DatasetRecord::Feature(record) => record.frame_index,
         DatasetRecord::Track(record) => record.first_frame,
-        DatasetRecord::Pose2d(record) => record.frame.map(|frame| frame.frame_index),
-        DatasetRecord::Pose3d(record) => record.frame.map(|frame| frame.frame_index),
         DatasetRecord::AudioFrame(_) | DatasetRecord::TextSegment(_) | DatasetRecord::Event(_) => {
             None
         }
