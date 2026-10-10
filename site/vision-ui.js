@@ -119,6 +119,84 @@ let lastDetections = [];
 let imageGeneration = 0;
 let activeOperation = null;
 
+// Learned-vision features whose browser model could not be loaded. Kept across
+// image changes because the runtime, not the image, is unavailable; cleared by
+// a successful explicit retry.
+const FEATURES = {
+  detect: {
+    name: "Concept detection",
+    buttons: () => [detectButton],
+    label: "Detect concepts",
+    retryLabel: "Retry concept detection",
+  },
+  sam: {
+    name: "SAM segmentation",
+    buttons: () => [samButton, refineButton],
+    label: "Prepare SAM",
+    retryLabel: "Retry loading SAM",
+  },
+};
+const unavailable = new Map();
+
+// Recognised by code rather than class so mocked model adapters stay minimal.
+function isModelUnavailable(error) {
+  return error?.code === "browser-model-unavailable";
+}
+
+function technicalCause(error) {
+  const cause = error?.cause ?? error;
+  return cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
+}
+
+function unavailableMessage(feature, error) {
+  const reason = {
+    runtime: "its browser model runtime could not be loaded",
+    weights: "its browser model could not be loaded",
+    capability: "this browser lacks a capability it requires",
+  }[error?.stage] ?? "its browser model could not be loaded";
+  return `${FEATURES[feature].name} is unavailable: ${reason}. Choose “${FEATURES[feature].retryLabel}” to try again.`;
+}
+
+function markUnavailable(feature, error) {
+  const message = unavailableMessage(feature, error);
+  const detail = technicalCause(error);
+  unavailable.set(feature, { message, detail });
+  renderUnavailable(feature);
+  setStatus(message, "error");
+  status.title = detail;
+  appendResult(`${FEATURES[feature].name} unavailable`, `Technical detail: ${detail}`);
+}
+
+function markAvailable(feature) {
+  if (!unavailable.delete(feature)) return;
+  renderUnavailable(feature);
+}
+
+function renderUnavailable(feature) {
+  const state = unavailable.get(feature);
+  const [primary] = FEATURES[feature].buttons();
+  primary.textContent = state ? FEATURES[feature].retryLabel : FEATURES[feature].label;
+  for (const button of FEATURES[feature].buttons()) {
+    if (state) {
+      button.dataset.unavailable = "true";
+      button.title = `${state.message} ${state.detail}`;
+      button.setAttribute("aria-describedby", "learned-vision-status");
+    } else {
+      delete button.dataset.unavailable;
+      button.removeAttribute("title");
+      button.removeAttribute("aria-describedby");
+    }
+  }
+}
+
+function reportFailure(feature, error) {
+  if (isModelUnavailable(error)) {
+    markUnavailable(feature, error);
+  } else {
+    setStatus(error instanceof Error ? error.message : String(error), "error");
+  }
+}
+
 function beginOperation() {
   const operation = { generation: imageGeneration, imageUrl, session: samSession };
   activeOperation = operation;
@@ -145,6 +223,7 @@ function finishOperation(operation) {
 function setStatus(message, kind = "") {
   status.textContent = message;
   status.dataset.kind = kind;
+  status.removeAttribute("title");
 }
 
 function setBusy(value) {
@@ -205,11 +284,17 @@ function resetForImage() {
     setStatus("Learned vision is available for still images.");
   } else {
     const capabilities = browserVisionCapabilities();
-    setStatus(
-      capabilities.webgpu
-        ? "Ready. Model weights download only after you choose a learned-vision action."
-        : "Text-conditioned detection can use the browser CPU/WASM backend; SAM refinement requires WebGPU.",
-    );
+    const [failed] = unavailable.values();
+    if (failed) {
+      setStatus(failed.message, "error");
+      status.title = failed.detail;
+    } else {
+      setStatus(
+        capabilities.webgpu
+          ? "Ready. Model weights download only after you choose a learned-vision action."
+          : "Text-conditioned detection can use the browser CPU/WASM backend; SAM refinement requires WebGPU.",
+      );
+    }
     configureOverlay(previewImage.naturalWidth || 1, previewImage.naturalHeight || 1);
   }
   setBusy(false);
@@ -290,6 +375,7 @@ async function ensureSamSession(operation) {
   if (!isCurrent(operation)) return null;
   samSession = operation.session;
   samReady = true;
+  markAvailable("sam");
   overlay.classList.add("is-sam-ready");
   return operation.session;
 }
@@ -306,6 +392,7 @@ async function runConceptDetection() {
       topK: 20,
     });
     if (!isCurrent(operation)) return;
+    markAvailable("detect");
     lastDetections = detections;
     drawDetections(detections);
     if (detections.length === 0) {
@@ -329,7 +416,7 @@ async function runConceptDetection() {
   } catch (error) {
     if (!isCurrent(operation)) return;
     lastDetections = [];
-    setStatus(error instanceof Error ? error.message : String(error), "error");
+    reportFailure("detect", error);
   } finally {
     finishOperation(operation);
   }
@@ -381,7 +468,7 @@ async function refineDetectionsWithSam() {
     );
   } catch (error) {
     if (!isCurrent(operation)) return;
-    setStatus(error instanceof Error ? error.message : String(error), "error");
+    reportFailure("sam", error);
   } finally {
     finishOperation(operation);
   }
@@ -410,7 +497,7 @@ async function prepareSam() {
     samReady = false;
     samPoints = [];
     overlay.classList.remove("is-sam-ready");
-    setStatus(error instanceof Error ? error.message : String(error), "error");
+    reportFailure("sam", error);
   } finally {
     finishOperation(operation);
   }
@@ -453,7 +540,7 @@ async function segmentAtPointer(event) {
     );
   } catch (error) {
     if (!isCurrent(operation)) return;
-    setStatus(error instanceof Error ? error.message : String(error), "error");
+    reportFailure("sam", error);
   } finally {
     finishOperation(operation);
   }
