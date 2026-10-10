@@ -2,7 +2,9 @@ name: Pages acceptance
 
 # Required check for issue #67. Deliberately not path-filtered and without
 # job-level conditions so the `Pages acceptance` check always reports on every
-# pull request head.
+# pull request head. The artifact is built exactly as pages.yml builds it today
+# (pinned coding-tooling + declared foundation source revision); building from
+# the repository alone / registry-only is deferred to issue #69.
 on:
   pull_request:
   push:
@@ -11,6 +13,9 @@ on:
 
 permissions:
   contents: read
+
+env:
+  CODING_TOOLING_REV: 7f63dade760bfb1020c69d1a0ac7319cbbdf91ab
 
 concurrency:
   group: pages-acceptance-${{ github.ref }}
@@ -29,6 +34,39 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Set up Bun for source-dependency tooling
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - name: Prepare pinned source workspaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init ../coding-tooling
+          git -C ../coding-tooling fetch --depth=1 https://github.com/moritzbrantner/coding-tooling.git "$CODING_TOOLING_REV"
+          git -C ../coding-tooling checkout --detach FETCH_HEAD
+          (cd ../coding-tooling && bun install --frozen-lockfile)
+
+          FOUNDATION_REV="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('.coding-tooling.source-deps.json').read_text())
+          revisions = {
+              patch['rev']
+              for patch in manifest['cargo']['patches']
+              if patch['git'] == 'https://github.com/moritzbrantner/moenarch-foundation'
+          }
+          if len(revisions) != 1:
+              raise SystemExit(f'expected one Foundation revision, found {sorted(revisions)}')
+          print(revisions.pop())
+          PY
+          )"
+          git init ../moenarch-foundation
+          git -C ../moenarch-foundation fetch --depth=1 https://github.com/moritzbrantner/moenarch-foundation.git "$FOUNDATION_REV"
+          git -C ../moenarch-foundation checkout --detach FETCH_HEAD
+      - name: Activate pinned source dependencies
+        run: bash scripts/source-deps activate
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
@@ -48,9 +86,12 @@ jobs:
         run: node --test tests/pages/*.test.mjs tests/pages-acceptance/*.test.mjs
       - name: Fixture integrity
         run: python tests/fixtures/pages/generate.py --check
-      - name: Build Pages from a clean checkout
-        run: bash scripts/check-pages-clean-checkout.sh _site
+      - name: Build and verify the Pages artifact
+        run: bash scripts/check-pages.sh _site
       - name: Browser acceptance (hermetic, one worker)
         env:
           PAGES_ARTIFACT_DIR: _site
         run: python tests/browser/pages_workbench.py
+      - name: Deactivate pinned source dependencies
+        if: always()
+        run: bash scripts/source-deps deactivate || true

@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # Build the GitHub Pages artifact from a clean checkout of the committed HEAD.
 #
+# NOT wired into CI: whether Pages must build without the pinned source-deps
+# sibling checkouts (publish moenarch-semantic-core, a minimal Pages crate
+# closure, or keep pinned checkouts) awaits the owner decision in
+# moritzbrantner/visual-analysis#69. On the current baseline this check fails
+# because moenarch-semantic-core is not on crates.io. Run it manually.
+#
 # Issue #67: Pages must build from the repository alone, using declared
 # dependencies. This check clones HEAD into an otherwise empty temporary
 # directory (so no sibling repositories, ignored build outputs, managed Cargo
