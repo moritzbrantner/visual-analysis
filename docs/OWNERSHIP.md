@@ -16,3 +16,9 @@ destination-authored private package and is not part of the source count.
 ComfyUI and spatial packages are excluded. `scenedetect-core` owns canonical
 scene algorithms; visual-analysis owns adapters, visual pipeline contracts,
 general FFmpeg integration, output extensions, and split planning.
+
+The machine-readable boundary contract is
+`docs/ownership/visual-analysis-boundary.json`. `scripts/check-visual-boundary.py`
+enforces it in the structural CI gate: only the declared adapter crates may
+depend on `scenedetect-core`, and no package may depend on other scene-detection
+crates or on downstream corpus/product repositories.
