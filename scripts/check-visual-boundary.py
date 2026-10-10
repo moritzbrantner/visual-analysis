@@ -205,18 +205,39 @@ def dependency_errors(contract: dict[str, Any], root: Path) -> list[str]:
     return errors
 
 
-def bun_manifests(root: Path) -> list[Path]:
-    """The root package.json and every manifest its `workspaces` globs declare."""
-    manifests = {root / "package.json"}
+UNSUPPORTED_GLOB_SYNTAX = ("{", "}", "[", "]", "!", "?", "(", ")", "+", "@")
+
+
+def bun_workspace_patterns(root: Path) -> list[str]:
     document = json.loads((root / "package.json").read_text())
     workspaces = document.get("workspaces", [])
     if isinstance(workspaces, dict):
         workspaces = workspaces.get("packages", [])
-    for pattern in workspaces:
+    return list(workspaces)
+
+
+def bun_manifests(root: Path) -> list[Path]:
+    """The root package.json and every manifest its `workspaces` globs declare.
+
+    Only plain `*`/`**` path globs are expanded; `workspace_errors` rejects any
+    other Bun glob syntax (braces, negation, classes) so it cannot hide packages."""
+    manifests = {root / "package.json"}
+    for pattern in bun_workspace_patterns(root):
+        if any(token in pattern for token in UNSUPPORTED_GLOB_SYNTAX):
+            continue
         for directory in root.glob(pattern):
             if (directory / "package.json").is_file():
                 manifests.add(directory / "package.json")
     return sorted(manifests)
+
+
+def workspace_errors(root: Path) -> list[str]:
+    return [
+        f"package.json workspace pattern {pattern!r} uses glob syntax this boundary check does not expand; "
+        "use plain `*`/`**` path patterns or extend the check"
+        for pattern in bun_workspace_patterns(root)
+        if any(token in pattern for token in UNSUPPORTED_GLOB_SYNTAX)
+    ]
 
 
 def bun_errors(contract: dict[str, Any], root: Path) -> list[str]:
@@ -240,7 +261,12 @@ def bun_errors(contract: dict[str, Any], root: Path) -> list[str]:
 
 def validate(root: Path = ROOT) -> list[str]:
     contract = load_contract(root)
-    return contract_errors(contract) + dependency_errors(contract, root) + bun_errors(contract, root)
+    return (
+        contract_errors(contract)
+        + dependency_errors(contract, root)
+        + workspace_errors(root)
+        + bun_errors(contract, root)
+    )
 
 
 def main() -> int:
