@@ -153,7 +153,7 @@ class VisualBoundaryTests(unittest.TestCase):
     def test_bun_workspaces_outside_packages_are_checked(self) -> None:
         root_manifest = self.root / "package.json"
         document = json.loads(root_manifest.read_text())
-        document["workspaces"] = [*document["workspaces"], "extras/*"]
+        document["workspaces"] = ["{packages,extras}/*", "!extras/tool"]
         root_manifest.write_text(json.dumps(document))
         extra = self.root / "extras" / "tool"
         extra.mkdir(parents=True)
@@ -163,14 +163,21 @@ class VisualBoundaryTests(unittest.TestCase):
         errors = boundary.validate(self.root)
         self.assertTrue(any("extras/tool/package.json" in e and "youtube-corpus" in e for e in errors), errors)
 
-    def test_unexpanded_workspace_glob_syntax_fails_closed(self) -> None:
+    def test_narrowed_workspace_declarations_cannot_hide_packages(self) -> None:
         root_manifest = self.root / "package.json"
-        for pattern in ("{apps,packages}/*", "!packages/visual-app-ui"):
-            document = json.loads((ROOT / "package.json").read_text())
-            document["workspaces"] = [*document["workspaces"], pattern]
-            root_manifest.write_text(json.dumps(document))
-            errors = boundary.validate(self.root)
-            self.assertTrue(any(f"workspace pattern {pattern!r}" in e for e in errors), errors)
+        document = json.loads(root_manifest.read_text())
+        document["workspaces"] = ["packages/visual-app-ui"]
+        root_manifest.write_text(json.dumps(document))
+        path = sorted(
+            manifest
+            for manifest in (self.root / "packages").glob("*/package.json")
+            if manifest.parent.name != "visual-app-ui"
+        )[0]
+        package = json.loads(path.read_text())
+        package.setdefault("dependencies", {})["scenedetect-cli"] = "0.1.0"
+        path.write_text(json.dumps(package))
+        errors = boundary.validate(self.root)
+        self.assertTrue(any("excluded package scenedetect-cli" in e for e in errors), errors)
 
     def test_excluded_authorities_cannot_be_dropped(self) -> None:
         document = self.contract()
