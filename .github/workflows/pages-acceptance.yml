@@ -1,0 +1,56 @@
+name: Pages acceptance
+
+# Required check for issue #67. Deliberately not path-filtered and without
+# job-level conditions so the `Pages acceptance` check always reports on every
+# pull request head.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-acceptance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pages-acceptance:
+    name: Pages acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: "2"
+      NODE_OPTIONS: --max-old-space-size=3072
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: 1.99.0
+          targets: wasm32-unknown-unknown
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked --version 0.14.0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.14"
+      - name: Install pinned browser test runner
+        run: |
+          python -m pip install --disable-pip-version-check -r tests/browser/requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Pages node tests and workflow contract
+        run: node --test tests/pages/*.test.mjs tests/pages-acceptance/*.test.mjs
+      - name: Fixture integrity
+        run: python tests/fixtures/pages/generate.py --check
+      - name: Build Pages from a clean checkout
+        run: bash scripts/check-pages-clean-checkout.sh _site
+      - name: Browser acceptance (hermetic, one worker)
+        env:
+          PAGES_ARTIFACT_DIR: _site
+        run: python tests/browser/pages_workbench.py
