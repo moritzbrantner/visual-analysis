@@ -414,7 +414,9 @@ fn frame_json(frame: &video_analysis_core::OwnedVideoFrame, limit: usize) -> ser
 }
 
 fn pixel_preview(data: &[u8], limit: usize) -> Vec<[u8; 3]> {
-    data.chunks_exact(3)
+    data.as_chunks::<3>()
+        .0
+        .iter()
         .take(limit)
         .map(|chunk| [chunk[0], chunk[1], chunk[2]])
         .collect()

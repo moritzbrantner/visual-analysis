@@ -226,14 +226,14 @@ fn mean_color_json(image: &OwnedImage) -> serde_json::Value {
     let pixels = (image.width as u64 * image.height as u64).max(1);
     match image.pixel_format {
         ImagePixelFormat::Rgb24 => {
-            for chunk in image.data.chunks_exact(3) {
+            for chunk in image.data.as_chunks::<3>().0.iter() {
                 red += chunk[0] as u64;
                 green += chunk[1] as u64;
                 blue += chunk[2] as u64;
             }
         }
         ImagePixelFormat::Bgr24 => {
-            for chunk in image.data.chunks_exact(3) {
+            for chunk in image.data.as_chunks::<3>().0.iter() {
                 blue += chunk[0] as u64;
                 green += chunk[1] as u64;
                 red += chunk[2] as u64;

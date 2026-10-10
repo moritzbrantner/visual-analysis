@@ -100,7 +100,7 @@ where
         }
         rgb.truncate(row_bytes * frame.height as usize);
         if frame.pixel_format == PixelFormat::Bgr24 {
-            for pixel in rgb.chunks_exact_mut(3) {
+            for pixel in rgb.as_chunks_mut::<3>().0.iter_mut() {
                 pixel.swap(0, 2);
             }
         }
