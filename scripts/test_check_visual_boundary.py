@@ -7,6 +7,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -178,6 +179,26 @@ class VisualBoundaryTests(unittest.TestCase):
         path.write_text(json.dumps(package))
         errors = boundary.validate(self.root)
         self.assertTrue(any("excluded package scenedetect-cli" in e for e in errors), errors)
+
+    def test_packages_under_build_named_directories_are_checked(self) -> None:
+        tool = self.root / "dist" / "tool"
+        tool.mkdir(parents=True)
+        (tool / "package.json").write_text(
+            json.dumps({"name": "tool", "dependencies": {"scenedetect-cli": "0.1.0"}})
+        )
+        errors = boundary.validate(self.root)
+        self.assertTrue(any("dist/tool/package.json" in e for e in errors), errors)
+
+    def test_git_checkouts_list_tracked_manifests(self) -> None:
+        subprocess.run(["git", "init", "-q", str(self.root)], check=True)
+        (self.root / ".gitignore").write_text("ignored/\n")
+        for directory, dependency in (("dist/tool", "scenedetect-cli"), ("ignored/build", "youtube-corpus")):
+            path = self.root / directory
+            path.mkdir(parents=True)
+            (path / "package.json").write_text(json.dumps({"name": "x", "dependencies": {dependency: "1"}}))
+        errors = boundary.validate(self.root)
+        self.assertTrue(any("dist/tool/package.json" in e for e in errors), errors)
+        self.assertFalse(any("ignored/build" in e for e in errors), errors)
 
     def test_excluded_authorities_cannot_be_dropped(self) -> None:
         document = self.contract()

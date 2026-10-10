@@ -15,6 +15,7 @@ Copied scene algorithms are rejected by scripts/check_visual_extraction.py.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -205,20 +206,32 @@ def dependency_errors(contract: dict[str, Any], root: Path) -> list[str]:
     return errors
 
 
-SKIPPED_DIRECTORIES = {".git", "node_modules", "target", "dist", "out", ".next", ".turbo"}
-
-
 def bun_manifests(root: Path) -> list[Path]:
-    """Every committed-tree package.json, found by scanning the repository rather
-    than trusting the root `workspaces` declaration, so no workspace pattern
-    (or a narrowed one) can hide a package from the boundary check."""
+    """Every package.json of the repository, independent of the root `workspaces`
+    declaration. In a Git checkout these are the tracked and untracked-but-not-ignored
+    files, so build outputs are skipped by .gitignore rather than by directory name;
+    elsewhere every directory except .git and node_modules is scanned."""
+    try:
+        listed = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+            check=True,
+            capture_output=True,
+        ).stdout
+        if (root / ".git").exists():
+            return sorted(
+                root / name
+                for name in listed.decode().split("\0")
+                if name and Path(name).name == "package.json" and (root / name).is_file()
+            )
+    except (OSError, subprocess.CalledProcessError):
+        pass
     manifests: list[Path] = []
     pending = [root]
     while pending:
         directory = pending.pop()
         for entry in directory.iterdir():
             if entry.is_dir() and not entry.is_symlink():
-                if entry.name not in SKIPPED_DIRECTORIES:
+                if entry.name not in {".git", "node_modules"}:
                     pending.append(entry)
             elif entry.name == "package.json" and entry.is_file():
                 manifests.append(entry)
