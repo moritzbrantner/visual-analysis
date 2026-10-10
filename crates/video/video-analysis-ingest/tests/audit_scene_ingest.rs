@@ -116,7 +116,7 @@ impl VideoFrameSource for Source {
         let stride = WIDTH as usize * 3 + if self.padded_bgr { 7 } else { 0 };
         let mut data = vec![0; stride * HEIGHT as usize];
         for row in data.chunks_exact_mut(stride) {
-            for pixel in row[..WIDTH as usize * 3].chunks_exact_mut(3) {
+            for pixel in row[..WIDTH as usize * 3].as_chunks_mut::<3>().0.iter_mut() {
                 pixel.copy_from_slice(&color);
                 if self.padded_bgr {
                     pixel.swap(0, 2);

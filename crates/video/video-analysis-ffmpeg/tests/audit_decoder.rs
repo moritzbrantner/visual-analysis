@@ -45,7 +45,7 @@ fn resized_frames_keep_color_identity_at_awkward_aspect_ratios() {
                 .expect("all three frames survive");
             assert_eq!(frame.width, target);
             assert_eq!(frame.data.len(), frame.stride * frame.height as usize);
-            for pixel in frame.data.chunks_exact(3) {
+            for pixel in frame.data.as_chunks::<3>().0.iter() {
                 assert!(
                     pixel
                         .iter()

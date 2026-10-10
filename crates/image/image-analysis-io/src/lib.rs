@@ -119,7 +119,7 @@ fn owned_to_dynamic(image: &OwnedImage) -> Result<DynamicImage> {
         }
         ImagePixelFormat::Bgr24 => {
             let mut rgb = Vec::with_capacity(image.data.len());
-            for chunk in image.data.chunks_exact(3) {
+            for chunk in image.data.as_chunks::<3>().0.iter() {
                 rgb.extend_from_slice(&[chunk[2], chunk[1], chunk[0]]);
             }
             let buffer = RgbImage::from_raw(image.width, image.height, rgb)
