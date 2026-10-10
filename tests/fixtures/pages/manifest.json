@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "generator": "tests/fixtures/pages/generate.py",
+  "image": {
+    "file": "workbench-quadrants.png",
+    "sha256": "7333933a6b09c909a4172d250b1b1eadea8664116b96f851ae9b68aee14f4f07",
+    "mimeType": "image/png",
+    "width": 16,
+    "height": 16,
+    "regions": [
+      {
+        "rgb": [
+          255,
+          0,
+          0
+        ],
+        "pixels": 128
+      },
+      {
+        "rgb": [
+          0,
+          0,
+          255
+        ],
+        "pixels": 64
+      },
+      {
+        "rgb": [
+          255,
+          255,
+          255
+        ],
+        "pixels": 64
+      }
+    ]
+  },
+  "video": {
+    "file": "workbench-steps.webm",
+    "sha256": "1ea2c65011a76da6a4e1298f4239a9ea880f75904d84dca5669a40735b6a8ba2",
+    "mimeType": "video/webm",
+    "codec": "vp9 lossless, yuv420p limited range",
+    "width": 64,
+    "height": 48,
+    "fps": 10,
+    "durationSeconds": 2.4,
+    "segments": [
+      {
+        "frames": 8,
+        "grey": 36
+      },
+      {
+        "frames": 8,
+        "grey": 124
+      },
+      {
+        "frames": 8,
+        "grey": 220
+      }
+    ]
+  }
+}

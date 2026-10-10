@@ -184,10 +184,70 @@ function waitForEvent(target, successEvent, errorEvent = "error") {
   });
 }
 
+// Upper bound for waiting on a presented frame after `seeked`. Browsers without
+// requestVideoFrameCallback, or that never present frames for a detached
+// element, fall back to the seeked frame after this delay.
+const PRESENTED_FRAME_TIMEOUT_MS = 1000;
+
+function nextPresentedFrame(video) {
+  if (typeof video.requestVideoFrameCallback !== "function") return null;
+  let handle;
+  let timer;
+  let seeked = false;
+  let resolvePresented;
+  const presented = new Promise((resolve) => {
+    resolvePresented = resolve;
+  });
+  // A frame presented before `seeked` still belongs to the previous position.
+  const onFrame = () => {
+    if (seeked) resolvePresented(true);
+    else handle = video.requestVideoFrameCallback(onFrame);
+  };
+  handle = video.requestVideoFrameCallback(onFrame);
+  return {
+    // Resolves once a frame is presented after the seek completed, or after
+    // the timeout.
+    wait: () => {
+      seeked = true;
+      timer = setTimeout(() => {
+        video.cancelVideoFrameCallback?.(handle);
+        resolvePresented(false);
+      }, PRESENTED_FRAME_TIMEOUT_MS);
+      return presented.finally(() => clearTimeout(timer));
+    },
+    cancel: () => {
+      clearTimeout(timer);
+      video.cancelVideoFrameCallback?.(handle);
+    },
+  };
+}
+
+function nextAnimationFrame() {
+  return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 async function seekVideo(video, time) {
-  if (Math.abs(video.currentTime - time) < 0.001) return;
-  video.currentTime = time;
-  await waitForEvent(video, "seeked");
+  if (Math.abs(video.currentTime - time) < 0.001 && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+    return;
+  }
+  // `seeked` can fire before the decoder presents the new frame, so drawing
+  // then may read the previous frame. Register for the next presented frame
+  // before seeking so the callback cannot be missed.
+  const frame = nextPresentedFrame(video);
+  try {
+    video.currentTime = time;
+    await waitForEvent(video, "seeked");
+  } catch (error) {
+    frame?.cancel();
+    throw error;
+  }
+  if (frame) {
+    await frame.wait();
+  } else {
+    // Without requestVideoFrameCallback, give the compositor two frames.
+    await nextAnimationFrame();
+    await nextAnimationFrame();
+  }
 }
 
 async function analyzeVideoFile(file) {

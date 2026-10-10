@@ -27,9 +27,56 @@ let transformersPromise;
 let samRuntimePromise;
 let openVocabularyDetectorPromise;
 
+// Raised when a learned-vision feature cannot run because its browser model
+// runtime, its model weights or a required browser capability could not be
+// loaded. Ordinary per-run failures keep their own errors. Consumers recognise
+// it by `code` so mocked adapters need not export this class.
+export const BROWSER_MODEL_UNAVAILABLE = "browser-model-unavailable";
+
+export class BrowserModelUnavailableError extends Error {
+  constructor(stage, cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause ?? "");
+    super(detail || `The browser model ${stage} could not be loaded.`, { cause });
+    this.name = "BrowserModelUnavailableError";
+    this.code = BROWSER_MODEL_UNAVAILABLE;
+    // "runtime" (transformers.js module), "weights" (model files) or
+    // "capability" (for example WebGPU).
+    this.stage = stage;
+  }
+}
+
+// A rejected load is not cached, so a later explicit retry loads again.
+function cacheLoad(get, set, stage, load) {
+  let promise = get();
+  if (!promise) {
+    promise = load().catch((error) => {
+      if (get() === promise) set(undefined);
+      throw error?.code === BROWSER_MODEL_UNAVAILABLE ? error : new BrowserModelUnavailableError(stage, error);
+    });
+    set(promise);
+  }
+  return promise;
+}
+
+let transformersLoadFailures = 0;
+
 function loadTransformers() {
-  transformersPromise ??= import(TRANSFORMERS_MODULE_URL);
-  return transformersPromise;
+  return cacheLoad(
+    () => transformersPromise,
+    (value) => { transformersPromise = value; },
+    "runtime",
+    () => {
+      // Browsers cache a failed module fetch per URL for the page lifetime, so
+      // an explicit retry must use a distinct URL of the same pinned version.
+      const url = transformersLoadFailures === 0
+        ? TRANSFORMERS_MODULE_URL
+        : `${TRANSFORMERS_MODULE_URL}?retry=${transformersLoadFailures}`;
+      return import(url).catch((error) => {
+        transformersLoadFailures += 1;
+        throw error;
+      });
+    },
+  );
 }
 
 export function browserVisionCapabilities() {
@@ -44,19 +91,26 @@ export function browserVisionCapabilities() {
 async function loadSamRuntime() {
   const capabilities = browserVisionCapabilities();
   if (!capabilities.webgpu) {
-    throw new Error(
-      "Interactive SAM segmentation requires WebGPU in this browser. Native DETR remains available through the CLI/server runtime.",
+    throw new BrowserModelUnavailableError(
+      "capability",
+      new Error(
+        "Interactive SAM segmentation requires WebGPU in this browser. Native DETR remains available through the CLI/server runtime.",
+      ),
     );
   }
 
-  samRuntimePromise ??= loadTransformers().then(async ({ SamModel, AutoProcessor, RawImage, Tensor }) => {
-    const [model, processor] = await Promise.all([
-      SamModel.from_pretrained(SAM_MODEL_ID, { dtype: "fp16", device: "webgpu" }),
-      AutoProcessor.from_pretrained(SAM_MODEL_ID),
-    ]);
-    return { model, processor, RawImage, Tensor };
-  });
-  return samRuntimePromise;
+  return cacheLoad(
+    () => samRuntimePromise,
+    (value) => { samRuntimePromise = value; },
+    "weights",
+    () => loadTransformers().then(async ({ SamModel, AutoProcessor, RawImage, Tensor }) => {
+      const [model, processor] = await Promise.all([
+        SamModel.from_pretrained(SAM_MODEL_ID, { dtype: "fp16", device: "webgpu" }),
+        AutoProcessor.from_pretrained(SAM_MODEL_ID),
+      ]);
+      return { model, processor, RawImage, Tensor };
+    }),
+  );
 }
 
 export async function prepareSamImage(imageUrl) {
@@ -332,12 +386,16 @@ export async function detectOpenVocabulary(imageUrl, labels, options = {}) {
   const threshold = Number.isFinite(options.threshold) ? options.threshold : 0.08;
   const topK = Number.isInteger(options.topK) ? Math.max(1, options.topK) : 20;
   const { pipeline } = await loadTransformers();
-  openVocabularyDetectorPromise ??= pipeline(
-    "zero-shot-object-detection",
-    OPEN_VOCAB_MODEL_ID,
-    browserVisionCapabilities().webgpu ? { device: "webgpu" } : {},
+  const detector = await cacheLoad(
+    () => openVocabularyDetectorPromise,
+    (value) => { openVocabularyDetectorPromise = value; },
+    "weights",
+    () => pipeline(
+      "zero-shot-object-detection",
+      OPEN_VOCAB_MODEL_ID,
+      browserVisionCapabilities().webgpu ? { device: "webgpu" } : {},
+    ),
   );
-  const detector = await openVocabularyDetectorPromise;
   const detections = await detector(imageUrl, candidateLabels, {
     threshold,
     top_k: topK,
