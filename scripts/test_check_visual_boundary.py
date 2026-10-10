@@ -128,6 +128,41 @@ class VisualBoundaryTests(unittest.TestCase):
         self.assertTrue(any("adapter crates must be exactly" in e for e in errors), errors)
         self.assertTrue(any("outside the declared scene adapter seam" in e for e in errors), errors)
 
+    def test_contract_edits_cannot_narrow_forbidden_packages(self) -> None:
+        document = self.contract()
+        for authority in document["excludedAuthorities"]:
+            authority["forbiddenPackages"] = []
+            authority["forbiddenPackagePrefixes"] = []
+        self.write_contract(document)
+        self.append_dependency("video", "video-analysis-storage", 'youtube-corpus = "0.1"')
+        self.append_dependency(
+            "image", "image-analysis-core", 'scene-cli = { package = "scenedetect-cli", version = "0.1" }'
+        )
+        errors = boundary.validate(self.root)
+        self.assertTrue(any("must keep its pinned forbidden packages" in e for e in errors), errors)
+        self.assertTrue(any("depends on youtube-corpus" in e for e in errors), errors)
+        self.assertTrue(any("depends on scenedetect-cli" in e for e in errors), errors)
+
+    def test_integration_module_is_pinned(self) -> None:
+        document = self.contract()
+        document["sceneSeam"]["integrationModule"] = "video-analysis-core::scenes"
+        self.write_contract(document)
+        errors = boundary.validate(self.root)
+        self.assertTrue(any("integration module must be" in e for e in errors), errors)
+
+    def test_bun_workspaces_outside_packages_are_checked(self) -> None:
+        root_manifest = self.root / "package.json"
+        document = json.loads(root_manifest.read_text())
+        document["workspaces"] = [*document["workspaces"], "extras/*"]
+        root_manifest.write_text(json.dumps(document))
+        extra = self.root / "extras" / "tool"
+        extra.mkdir(parents=True)
+        (extra / "package.json").write_text(
+            json.dumps({"name": "tool", "dependencies": {"youtube-corpus": "1.0.0"}})
+        )
+        errors = boundary.validate(self.root)
+        self.assertTrue(any("extras/tool/package.json" in e and "youtube-corpus" in e for e in errors), errors)
+
     def test_excluded_authorities_cannot_be_dropped(self) -> None:
         document = self.contract()
         document["excludedAuthorities"] = [

@@ -27,10 +27,29 @@ REPOSITORY = "moritzbrantner/visual-analysis"
 SCENE_SEAM_PACKAGE = "scenedetect-core"
 # Pinned here so that editing the contract this check protects cannot widen the seam.
 PINNED_ADAPTER_CRATES = {"moenarch-video-analysis-core", "moenarch-video-analysis-detectors"}
-REQUIRED_EXCLUDED = {
-    "canonical-scene-boundary-algorithms",
-    "media-corpus-persistence-and-product-workflows",
+INTEGRATION_MODULE = "video-analysis-detectors::canonical"
+# Forbidden packages and prefixes every required excluded authority must keep.
+# Pinned here so that narrowing the contract cannot open the boundary; the
+# contract may add more, never fewer.
+PINNED_FORBIDDEN = {
+    "canonical-scene-boundary-algorithms": (
+        {"scenedetect-cli", "scenedetect-ffmpeg", "scenedetect-wasm"},
+        {"scenedetect-"},
+    ),
+    "media-corpus-persistence-and-product-workflows": (
+        {"interactive-videos", "media-intelligence", "media-similarity", "video-to-3d", "youtube-corpus"},
+        {
+            "media-intelligence-",
+            "media-similarity-",
+            "moenarch-media-intelligence",
+            "moenarch-media-similarity",
+            "moenarch-youtube-corpus",
+            "video-to-3d-",
+            "youtube-corpus-",
+        },
+    ),
 }
+REQUIRED_EXCLUDED = set(PINNED_FORBIDDEN)
 DEPENDENCY_SECTIONS = ("dependencies", "dev-dependencies", "build-dependencies")
 BUN_SECTIONS = ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies")
 
@@ -57,12 +76,25 @@ def contract_errors(contract: dict[str, Any]) -> list[str]:
     missing = sorted(REQUIRED_EXCLUDED - excluded)
     if missing:
         errors.append(f"boundary contract must exclude: {missing}")
+    for authority in contract.get("excludedAuthorities", []):
+        pinned = PINNED_FORBIDDEN.get(authority.get("authority"))
+        if pinned is None:
+            continue
+        names, prefixes = pinned
+        if not names <= set(authority.get("forbiddenPackages", [])) or not prefixes <= set(
+            authority.get("forbiddenPackagePrefixes", [])
+        ):
+            errors.append(
+                f"excluded authority {authority.get('authority')} must keep its pinned forbidden packages and prefixes"
+            )
     owned = set(contract.get("ownedCapabilities", []))
     if owned & excluded:
         errors.append(f"capabilities both owned and excluded: {sorted(owned & excluded)}")
     seam = contract.get("sceneSeam", {})
     if seam.get("package") != SCENE_SEAM_PACKAGE or seam.get("ownerRepository") != "moritzbrantner/scenedetect-rs":
         errors.append("the scene seam must be scenedetect-core, owned by scenedetect-rs")
+    if seam.get("integrationModule") != INTEGRATION_MODULE:
+        errors.append(f"the scene seam integration module must be {INTEGRATION_MODULE}")
     if set(seam.get("adapterCrates", [])) != PINNED_ADAPTER_CRATES:
         errors.append(
             "scene seam adapter crates must be exactly moenarch-video-analysis-core and moenarch-video-analysis-detectors; "
@@ -74,6 +106,9 @@ def contract_errors(contract: dict[str, Any]) -> list[str]:
 def forbidden_rules(contract: dict[str, Any]) -> tuple[set[str], tuple[str, ...]]:
     names: set[str] = set()
     prefixes: list[str] = []
+    for pinned_names, pinned_prefixes in PINNED_FORBIDDEN.values():
+        names.update(pinned_names)
+        prefixes.extend(sorted(pinned_prefixes))
     for authority in contract.get("excludedAuthorities", []):
         names.update(authority.get("forbiddenPackages", []))
         prefixes.extend(authority.get("forbiddenPackagePrefixes", []))
@@ -170,11 +205,24 @@ def dependency_errors(contract: dict[str, Any], root: Path) -> list[str]:
     return errors
 
 
+def bun_manifests(root: Path) -> list[Path]:
+    """The root package.json and every manifest its `workspaces` globs declare."""
+    manifests = {root / "package.json"}
+    document = json.loads((root / "package.json").read_text())
+    workspaces = document.get("workspaces", [])
+    if isinstance(workspaces, dict):
+        workspaces = workspaces.get("packages", [])
+    for pattern in workspaces:
+        for directory in root.glob(pattern):
+            if (directory / "package.json").is_file():
+                manifests.add(directory / "package.json")
+    return sorted(manifests)
+
+
 def bun_errors(contract: dict[str, Any], root: Path) -> list[str]:
     errors: list[str] = []
     names, prefixes = forbidden_rules(contract)
-    manifests = [root / "package.json", *sorted((root / "packages").glob("*/package.json"))]
-    for manifest in manifests:
+    for manifest in bun_manifests(root):
         if not manifest.is_file():
             continue
         document = json.loads(manifest.read_text())
