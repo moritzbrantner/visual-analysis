@@ -1,6 +1,7 @@
 //! Same-process legacy/candidate comparison. Correctness and allocation budgets
 //! are tested separately; machine-dependent timings are evidence, not CI gates.
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 use num_rational::Rational64;
 use video_analysis_core::{
     ContentDetector, FramePosition, OwnedVideoFrame, PixelFormat, Result, ScenePipeline,

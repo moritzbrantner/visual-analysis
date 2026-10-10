@@ -1,4 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 use image_analysis_core::OwnedImage;
 use image_analysis_detection::FaceLandmarks;
 use image_analysis_embeddings::align_face_for_sface;
