@@ -26,6 +26,8 @@ jobs:
           bun-version: 1.4.2
       - run: git diff --check c5d6b02a708837cf01ee6e033faa41b0a667b38b..HEAD
       - run: python3 scripts/check_visual_extraction.py --check
+      - name: Capability boundary
+        run: python3 scripts/test_check_visual_boundary.py && python3 scripts/check-visual-boundary.py
 
       - name: Prepare pinned source workspaces
         shell: bash

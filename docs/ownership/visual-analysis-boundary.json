@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "repository": "moritzbrantner/visual-analysis",
+  "layer": "capability",
+  "purpose": "Owns reusable image and video analysis capabilities (OCR, detection, embeddings, face/image analysis, general video processing adapters) and visual pipeline contracts. Canonical scene-boundary algorithms stay in scenedetect-rs and are consumed only through the scenedetect-core adapter seam; corpus persistence and product workflows live above this repository.",
+  "ownedCapabilities": [
+    "general-video-processing-adapters",
+    "image-analysis",
+    "scene-detector-adapters",
+    "visual-pipeline-contracts",
+    "visual-wasm-and-app-surfaces"
+  ],
+  "excludedAuthorities": [
+    {
+      "authority": "canonical-scene-boundary-algorithms",
+      "ownerRepository": "moritzbrantner/scenedetect-rs",
+      "forbiddenPackages": ["scenedetect-cli", "scenedetect-ffmpeg", "scenedetect-wasm"],
+      "forbiddenPackagePrefixes": ["scenedetect-"]
+    },
+    {
+      "authority": "media-corpus-persistence-and-product-workflows",
+      "ownerRepository": "downstream application and corpus repositories",
+      "forbiddenPackages": [
+        "interactive-videos",
+        "media-intelligence",
+        "media-similarity",
+        "video-to-3d",
+        "youtube-corpus"
+      ],
+      "forbiddenPackagePrefixes": [
+        "media-intelligence-",
+        "media-similarity-",
+        "moenarch-media-intelligence",
+        "moenarch-media-similarity",
+        "moenarch-youtube-corpus",
+        "video-to-3d-",
+        "youtube-corpus-"
+      ]
+    }
+  ],
+  "sceneSeam": {
+    "package": "scenedetect-core",
+    "ownerRepository": "moritzbrantner/scenedetect-rs",
+    "adapterCrates": ["moenarch-video-analysis-core", "moenarch-video-analysis-detectors"],
+    "integrationModule": "video-analysis-detectors::canonical"
+  }
+}

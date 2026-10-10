@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "structural:prepare": "python3 scripts/check_visual_extraction.py --check --preparation-only",
-    "structural:check": "python3 scripts/check_visual_extraction.py --check"
+    "structural:check": "python3 scripts/check_visual_extraction.py --check",
+    "boundary:check": "python3 scripts/test_check_visual_boundary.py && python3 scripts/check-visual-boundary.py"
   }
 }
