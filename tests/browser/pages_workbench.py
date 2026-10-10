@@ -39,11 +39,27 @@ TIMEOUT_MS = 30_000
 IMAGE = FIXTURES / MANIFEST["image"]["file"]
 VIDEO = FIXTURES / MANIFEST["video"]["file"]
 
-# Model-backed learned-vision controls. They need model weights/runtime that
-# the Pages artifact does not ship, so on Pages they must be explicitly
-# unavailable (disabled, with visible explanatory text).
-MODEL_BACKED_CONTROL_IDS = ("detect-concepts", "refine-detections", "prepare-sam")
-MODEL_BACKED_TEXT = re.compile(r"detect|segment|\bsam\b|refine|model|concept", re.IGNORECASE)
+# Browser-model (learned vision) controls. They run on Pages in a capable
+# browser by loading a declared external runtime (transformers.js pinned to an
+# exact version on jsDelivr) and model weights from Hugging Face. These are the
+# only off-origin requests the artifact may make, and only after the user
+# chooses such a control. This suite still blocks them: it must then show an
+# explicit, visible failed-to-load/unavailable state that names the feature.
+# Note: the transformers.js runtime is version-pinned (@3.5.0 in
+# site/vision-models.js), but the Hugging Face model weights are fetched without
+# a pinned revision -- tracked as a follow-up, not asserted here.
+BROWSER_MODEL_CONTROLS = {
+    "detect-concepts": re.compile(r"detect", re.IGNORECASE),
+    "prepare-sam": re.compile(r"\bSAM\b|segment", re.IGNORECASE),
+    "refine-detections": re.compile(r"\bSAM\b|segment|refine", re.IGNORECASE),
+}
+DECLARED_BROWSER_MODEL_HOSTS = ("cdn.jsdelivr.net", "huggingface.co", "hf.co")
+LOAD_FAILURE_TEXT = re.compile(
+    r"unavailable|not available|(?:could not|couldn't|cannot|can't|failed to|unable to) (?:be )?load",
+    re.IGNORECASE,
+)
+# Capabilities that need native, ONNX or server backends cannot run on Pages.
+NATIVE_BACKEND_TEXT = re.compile(r"native|onnx|server|\bDETR\b|yunet|cli\b", re.IGNORECASE)
 UNAVAILABLE_TEXT = re.compile(r"unavailable|not available", re.IGNORECASE)
 
 # Regression golden for the WASM perceptual hash (image.processing.hash,
@@ -164,7 +180,8 @@ class PagesWorkbench(unittest.TestCase):
         self.context = self.browser.new_context(
             viewport={"width": 1200, "height": 1000}, accept_downloads=True, service_workers="block"
         )
-        self.blocked: list[str] = []
+        self.blocked: list[str] = []  # undeclared off-origin requests
+        self.declared_external: list[str] = []  # declared browser-model runtime/weights (blocked)
         self.responses: list = []
         self.page_errors: list[str] = []
         self.context.route("**/*", self._route)
@@ -183,7 +200,9 @@ class PagesWorkbench(unittest.TestCase):
         if url.startswith(self.origin + "/") or url.startswith(("data:", "blob:")):
             route.continue_()
         else:
-            self.blocked.append(url)
+            host = urlsplit(url).hostname or ""
+            declared = any(host == item or host.endswith("." + item) for item in DECLARED_BROWSER_MODEL_HOSTS)
+            (self.declared_external if declared else self.blocked).append(url)
             route.abort()
 
     # -- helpers ---------------------------------------------------------
@@ -317,31 +336,87 @@ class PagesWorkbench(unittest.TestCase):
 
     # -- model-backed features ------------------------------------------
 
-    def test_model_backed_features_are_explicitly_unavailable(self):
+    def test_native_backend_capabilities_have_no_enabled_controls_on_pages(self):
+        """Capabilities needing native/ONNX/server backends cannot run on Pages.
+
+        Where the page mentions them it must not offer an enabled control for
+        them; any control naming such a backend must be disabled and explained.
+        """
         self.open()
         self.analyze(IMAGE)
-        self.page.wait_for_timeout(250)  # let the lazily imported vision UI settle
-
-        controls = self.page.locator("button").all()
-        model_backed = []
-        for control in controls:
-            identifier = control.get_attribute("id") or ""
+        self.page.wait_for_timeout(250)
+        offending = self.page.evaluate(
+            """() => {
+              const enabled = node => !node.disabled && node.getClientRects().length > 0;
+              const out = [];
+              for (const card of document.querySelectorAll('#capabilities .capability-card')) {
+                const status = card.querySelector('.capability-status');
+                if (status?.textContent.trim() === 'Runs here') continue;
+                for (const node of card.querySelectorAll('button, input, select, textarea')) {
+                  if (enabled(node)) out.push(card.querySelector('h3')?.textContent + ': ' + (node.id || node.textContent));
+                }
+              }
+              return out;
+            }"""
+        )
+        self.assertEqual(offending, [], "capabilities that do not run on Pages expose enabled controls")
+        for control in self.page.locator("button").all():
             label = control.inner_text()
-            if identifier in MODEL_BACKED_CONTROL_IDS or (
-                control.evaluate("node => Boolean(node.closest('#learned-vision-section'))")
-                and identifier != "clear-vision-overlay"
-                and MODEL_BACKED_TEXT.search(label)
-            ):
-                model_backed.append((identifier or label, control))
+            if NATIVE_BACKEND_TEXT.search(label) and control.is_visible():
+                self.assertTrue(control.is_disabled(), f"native-backend control {label!r} is enabled on Pages")
+                self.assertTrue(
+                    self.page.get_by_text(UNAVAILABLE_TEXT).count() > 0,
+                    f"native-backend control {label!r} lacks an explicit unavailable explanation",
+                )
 
-        enabled = [name for name, control in model_backed if control.is_visible() and control.is_enabled()]
-        explanation = self.page.locator("#learned-vision-section, #capabilities").get_by_text(UNAVAILABLE_TEXT)
-        explained = [item.inner_text().strip() for item in explanation.all() if item.is_visible()]
+    def test_browser_model_controls_report_runtime_load_failure_explicitly(self):
+        """With the declared external runtime/weights unreachable, each enabled
+        browser-model control must end in a visible state that names the
+        feature and says it is unavailable / failed to load -- not a silent
+        no-op, a raw technical error or an unhandled exception."""
         problems = []
-        if enabled:
-            problems.append(f"model-backed controls must be disabled on Pages, enabled: {enabled}")
-        if not explained:
-            problems.append("Pages must state visibly that model-backed features are unavailable")
+        for control_id, feature in BROWSER_MODEL_CONTROLS.items():
+            self.open()
+            self.analyze(IMAGE)
+            self.page.wait_for_timeout(250)
+            control = self.page.locator(f"#{control_id}")
+            if control.count() == 0 or not control.is_visible():
+                continue
+            section = self.page.locator("#learned-vision-section")
+            if control.is_disabled():
+                # Disabled up front (e.g. no WebGPU, or no detections yet to
+                # refine): fine, as long as SAM/detection unavailability is
+                # explained when the precondition is the runtime itself.
+                if control_id == "refine-detections":
+                    continue
+                visible = [t for t in section.get_by_text(feature).all_inner_texts() if t.strip()]
+                if not any(LOAD_FAILURE_TEXT.search(t) or re.search(r"disabled|requires", t, re.I) for t in visible):
+                    problems.append(f"#{control_id} is disabled without a visible explanation naming the feature")
+                continue
+            control.click()
+            try:
+                self.page.wait_for_function(
+                    """() => {
+                      const status = document.getElementById('learned-vision-status');
+                      const busy = Array.from(document.querySelectorAll('#learned-vision-section button'))
+                        .some(button => button.disabled && button.id !== 'refine-detections');
+                      return status && !/^Loading|^Decoding|^Refining/.test(status.textContent.trim()) && !busy;
+                    }""",
+                    timeout=15_000,
+                )
+            except Exception:  # noqa: BLE001 - reported through the state assertions below
+                pass
+            self.page.wait_for_timeout(250)
+            status = self.page.locator("#learned-vision-status")
+            status_text = status.inner_text().strip() if status.count() and status.is_visible() else ""
+            candidates = [status_text] + [
+                t for t in section.get_by_text(LOAD_FAILURE_TEXT).all_inner_texts() if t.strip()
+            ]
+            if not any(LOAD_FAILURE_TEXT.search(t) and feature.search(t) for t in candidates if t):
+                problems.append(
+                    f"#{control_id}: no visible unavailable/failed-to-load message naming the feature "
+                    f"(status: {status_text!r})"
+                )
         self.assertEqual(problems, [])
 
     # -- every enabled control does something ---------------------------
@@ -381,16 +456,9 @@ class PagesWorkbench(unittest.TestCase):
         )
         self.page.wait_for_timeout(500)  # let asynchronous work (and any off-origin request) surface
         self.assertEqual(
-            self.blocked[blocked_before:], [], f"enabled control {selector} depends on resources outside the artifact"
-        )
-        self.assertNotIn(
-            "error",
-            [
-                self.page.locator("#learned-vision-status").get_attribute("data-kind")
-                if self.page.locator("#learned-vision-status").count()
-                else None
-            ],
-            f"enabled control {selector} failed",
+            self.blocked[blocked_before:],
+            [],
+            f"enabled control {selector} depends on undeclared resources outside the artifact",
         )
 
     def test_every_enabled_control_has_an_effect(self):
