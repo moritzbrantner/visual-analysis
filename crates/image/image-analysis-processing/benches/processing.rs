@@ -1,4 +1,5 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 use image_analysis_core::{ImagePixelFormat, OwnedImage};
 use image_analysis_processing::{
     convolve_3x3_kernel, grayscale_image, resize_nearest, ImageOperation, ImageProcessor,

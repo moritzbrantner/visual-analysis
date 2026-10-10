@@ -1,6 +1,7 @@
 //! Bounded sampling and deterministic association benchmarks, with semantic
 //! assertions outside the timed loop. No model loading or timing thresholds.
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use std::hint::black_box;
 use num_rational::Rational64;
 use video_analysis_core::{BoundingBox, FramePosition, Observation, ObservationKind, Scene};
 use video_analysis_recognition::{
