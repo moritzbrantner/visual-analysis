@@ -51,13 +51,15 @@ test("Pages deploys only the clean-checkout artifact with verified provenance", 
   assert.match(source, /^ {2}deploy:[\s\S]*needs:\s*build/m, "deploy must use the build job's artifact");
 });
 
-test("Pages acceptance proves the deployed clean-checkout artifact equals the tested one", async () => {
+test("Pages acceptance tests the artifact the deployed clean-checkout path builds", async () => {
   const source = await workflow("pages-acceptance.yml");
-  assert.match(source, /bash scripts\/check-pages-clean-checkout\.sh "\$RUNNER_TEMP\/pages-clean"/);
-  assert.match(source, /node scripts\/check-pages-provenance\.mjs "\$RUNNER_TEMP\/pages-clean" \./);
-  assert.match(source, /diff -r --exclude=build-provenance\.json _site "\$RUNNER_TEMP\/pages-clean"/);
-  const identity = source.indexOf("check-pages-clean-checkout.sh");
-  assert.ok(identity > source.indexOf("bash scripts/check-pages.sh _site"), "compare after the tested artifact is built");
+  const inPlace = source.indexOf("bash scripts/check-pages.sh _site");
+  const clean = source.search(/bash scripts\/check-pages-clean-checkout\.sh _site\n/);
+  const provenance = source.search(/node scripts\/check-pages-provenance\.mjs _site \.\n/);
+  const browser = source.indexOf("tests/browser/pages_workbench.py");
+  assert.ok(inPlace >= 0 && clean > inPlace, "rebuild _site through the clean-checkout path after the in-place check");
+  assert.ok(provenance > clean, "verify the rebuilt artifact's provenance against this commit");
+  assert.ok(browser > provenance, "the browser suite must run against the clean-checkout artifact");
 });
 
 test("Pages acceptance runs on every pull request under a stable, never-skipped check name", async () => {
