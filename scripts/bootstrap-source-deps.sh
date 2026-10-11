@@ -67,6 +67,12 @@ PY
 )"
 require_commit_id moenarch-foundation "$FOUNDATION_REV"
 
+# A temporary checkout being fetched; removed on any exit (error, signal)
+# unless it was moved into place.
+PARTIAL=""
+trap 'if [[ -n "$PARTIAL" ]]; then rm -rf "$PARTIAL"; fi' EXIT
+trap 'exit 130' INT TERM
+
 ensure_checkout() {
   local name="$1" url="$2" rev="$3"
   local dir="$PARENT_DIR/$name"
@@ -84,21 +90,16 @@ ensure_checkout() {
   # Fetch into a temporary directory and move it into place only once it is
   # complete, so an interrupted or failed fetch never leaves a half-made
   # sibling that a rerun would refuse.
-  local partial
-  partial="$(mktemp -d "$PARENT_DIR/.$name.partial.XXXXXX")"
-  git init --quiet "$partial"
-  if ! git -C "$partial" fetch --quiet --depth=1 "$url" "$rev" \
-    || ! git -C "$partial" checkout --quiet --detach FETCH_HEAD; then
-    rm -rf "$partial"
-    fail "cannot fetch $url at pinned $rev"
-  fi
+  PARTIAL="$(mktemp -d "$PARENT_DIR/.$name.partial.XXXXXX")"
+  git init --quiet "$PARTIAL"
+  git -C "$PARTIAL" fetch --quiet --depth=1 "$url" "$rev" \
+    && git -C "$PARTIAL" checkout --quiet --detach FETCH_HEAD \
+    || fail "cannot fetch $url at pinned $rev"
   local head
-  head="$(git -C "$partial" rev-parse HEAD)"
-  if [[ "$head" != "$rev" ]]; then
-    rm -rf "$partial"
-    fail "$url fetched $head instead of pinned $rev"
-  fi
-  mv "$partial" "$dir"
+  head="$(git -C "$PARTIAL" rev-parse HEAD)"
+  [[ "$head" == "$rev" ]] || fail "$url fetched $head instead of pinned $rev"
+  mv "$PARTIAL" "$dir"
+  PARTIAL=""
   printf 'source input %s: fetched %s at %s\n' "$name" "$url" "$rev"
 }
 
