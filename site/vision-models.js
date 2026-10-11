@@ -3,10 +3,15 @@ const TRANSFORMERS_MODULE_URL =
 
 export const SAM_MODEL_ID = "Xenova/slimsam-77-uniform";
 export const OPEN_VOCAB_MODEL_ID = "Xenova/owlvit-base-patch32";
+// Model weights are pinned to exact Hugging Face commits, like the runtime
+// version above, so the site's model behaviour changes only with a commit here.
+export const SAM_MODEL_REVISION = "5850ab45f587c112167512ffef949107115e26a0";
+export const OPEN_VOCAB_MODEL_REVISION = "b75f4e52949639c3bb0b96546ea4149482f6e7ef";
 
 export const BROWSER_VISION_MODELS = Object.freeze([
   Object.freeze({
     id: SAM_MODEL_ID,
+    revision: SAM_MODEL_REVISION,
     task: "image-segmentation",
     execution: "browser-webgpu",
     optIn: true,
@@ -15,6 +20,7 @@ export const BROWSER_VISION_MODELS = Object.freeze([
   }),
   Object.freeze({
     id: OPEN_VOCAB_MODEL_ID,
+    revision: OPEN_VOCAB_MODEL_REVISION,
     task: "zero-shot-object-detection",
     execution: "browser-webgpu-or-wasm",
     optIn: true,
@@ -83,7 +89,9 @@ export function browserVisionCapabilities() {
   return {
     webgpu: typeof navigator !== "undefined" && Boolean(navigator.gpu),
     samModel: SAM_MODEL_ID,
+    samModelRevision: SAM_MODEL_REVISION,
     openVocabularyModel: OPEN_VOCAB_MODEL_ID,
+    openVocabularyModelRevision: OPEN_VOCAB_MODEL_REVISION,
     transformersModule: TRANSFORMERS_MODULE_URL,
   };
 }
@@ -105,8 +113,12 @@ async function loadSamRuntime() {
     "weights",
     () => loadTransformers().then(async ({ SamModel, AutoProcessor, RawImage, Tensor }) => {
       const [model, processor] = await Promise.all([
-        SamModel.from_pretrained(SAM_MODEL_ID, { dtype: "fp16", device: "webgpu" }),
-        AutoProcessor.from_pretrained(SAM_MODEL_ID),
+        SamModel.from_pretrained(SAM_MODEL_ID, {
+          revision: SAM_MODEL_REVISION,
+          dtype: "fp16",
+          device: "webgpu",
+        }),
+        AutoProcessor.from_pretrained(SAM_MODEL_ID, { revision: SAM_MODEL_REVISION }),
       ]);
       return { model, processor, RawImage, Tensor };
     }),
@@ -393,7 +405,10 @@ export async function detectOpenVocabulary(imageUrl, labels, options = {}) {
     () => pipeline(
       "zero-shot-object-detection",
       OPEN_VOCAB_MODEL_ID,
-      browserVisionCapabilities().webgpu ? { device: "webgpu" } : {},
+      {
+        revision: OPEN_VOCAB_MODEL_REVISION,
+        ...(browserVisionCapabilities().webgpu ? { device: "webgpu" } : {}),
+      },
     ),
   );
   const detections = await detector(imageUrl, candidateLabels, {
