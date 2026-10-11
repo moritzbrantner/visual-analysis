@@ -32,8 +32,35 @@ function siblingCheckoutViolations(source) {
   return violations;
 }
 
-// Building Pages from the repository alone (no pinned sibling source checkouts)
-// is deferred to issue #69; siblingCheckoutViolations stays available for it.
+// Issue #69: pages.yml must deploy the artifact built from a clean clone that
+// fetches only the declared pins (scripts/check-pages-clean-checkout.sh), never
+// one built in the workflow's own checkout against prepared siblings.
+test("Pages deploys only the clean-checkout artifact with verified provenance", async () => {
+  const source = await workflow("pages.yml");
+  assert.deepEqual(siblingCheckoutViolations(source), [], "pages.yml must not prepare sibling source workspaces itself");
+  const jobs = source.slice(source.search(/^jobs:/m));
+  assert.doesNotMatch(jobs, /run:[^\n]*(?:bootstrap-source-deps|scripts\/check-pages\.sh)/, "pages.yml must not build in its own checkout");
+  const build = source.slice(source.search(/^ {2}build:/m), source.search(/^ {2}deploy:/m));
+  const clean = build.search(/bash scripts\/check-pages-clean-checkout\.sh _site\n/);
+  const provenance = build.search(/node scripts\/check-pages-provenance\.mjs _site \.\n/);
+  const upload = build.search(/uses:\s*actions\/upload-pages-artifact@/);
+  assert.ok(clean >= 0, "the build job must build _site from a clean checkout");
+  assert.ok(provenance > clean, "the build job must verify the artifact's provenance against this commit");
+  assert.ok(upload > provenance, "the uploaded artifact must be the verified one");
+  assert.match(build.slice(upload), /with:\s*\n\s*path:\s*_site\s*\n/, "the uploaded path must be the clean-checkout _site");
+  assert.match(source, /^ {2}deploy:[\s\S]*needs:\s*build/m, "deploy must use the build job's artifact");
+});
+
+test("Pages acceptance tests the artifact the deployed clean-checkout path builds", async () => {
+  const source = await workflow("pages-acceptance.yml");
+  const inPlace = source.indexOf("bash scripts/check-pages.sh _site");
+  const clean = source.search(/bash scripts\/check-pages-clean-checkout\.sh _site\n/);
+  const provenance = source.search(/node scripts\/check-pages-provenance\.mjs _site \.\n/);
+  const browser = source.indexOf("tests/browser/pages_workbench.py");
+  assert.ok(inPlace >= 0 && clean > inPlace, "rebuild _site through the clean-checkout path after the in-place check");
+  assert.ok(provenance > clean, "verify the rebuilt artifact's provenance against this commit");
+  assert.ok(browser > provenance, "the browser suite must run against the clean-checkout artifact");
+});
 
 test("Pages acceptance runs on every pull request under a stable, never-skipped check name", async () => {
   const names = await readdir(workflowDir);

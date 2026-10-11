@@ -3,8 +3,8 @@ name: Pages acceptance
 # Required check for issue #67. Deliberately not path-filtered and without
 # job-level conditions so the `Pages acceptance` check always reports on every
 # pull request head. The artifact is built exactly as pages.yml builds it today
-# (pinned coding-tooling + declared foundation source revision); building from
-# the repository alone / registry-only is deferred to issue #69.
+# (pinned coding-tooling + declared foundation source revision); the browser
+# suite then runs against the clean-checkout build that pages.yml deploys (#69).
 on:
   pull_request:
   push:
@@ -58,6 +58,14 @@ jobs:
         run: python tests/fixtures/pages/generate.py --check
       - name: Build and verify the Pages artifact
         run: bash scripts/check-pages.sh _site
+      # #69: pages.yml deploys the clean-checkout build of this commit. Replace
+      # _site with that build (same script, commit and pins) so the browser
+      # suite tests exactly the artifact the deployment path produces.
+      - name: Rebuild the artifact through the deployed clean-checkout path
+        run: |
+          set -euo pipefail
+          bash scripts/check-pages-clean-checkout.sh _site
+          node scripts/check-pages-provenance.mjs _site .
       - name: Browser acceptance (hermetic, one worker)
         env:
           PAGES_ARTIFACT_DIR: _site
