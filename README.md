@@ -15,6 +15,17 @@ WASM, package, consumer, and benchmark evidence was deliberately not run or
 claimed. See [docs/PROVENANCE.md](docs/PROVENANCE.md) and
 [docs/repository-split/package-ownership.json](docs/repository-split/package-ownership.json).
 
+## Build from a fresh clone
+
+```bash
+git clone https://github.com/moritzbrantner/visual-analysis
+cd visual-analysis
+bash scripts/bootstrap-source-deps.sh   # fetch + activate the pinned source inputs
+cargo test --locked --workspace
+```
+
+The bootstrap fetches exactly two declared, revision-pinned public inputs next to the checkout and activates them with the existing `scripts/source-deps` tooling: `coding-tooling` at the commit in [`scripts/coding-tooling.rev`](scripts/coding-tooling.rev), and `moenarch-foundation` at the one commit every patch in [`.coding-tooling.source-deps.json`](.coding-tooling.source-deps.json) declares. No sibling checkout has to be prepared by hand and no credentials are used. An existing sibling is reused only at exactly the pinned commit; a moving, invalid, mixed or unresolvable pin fails visibly. The `Fresh-clone bootstrap` workflow verifies this path from an otherwise empty directory. Registry-only resolution remains separate release evidence. See [docs/SOURCE_DEVELOPMENT.md](docs/SOURCE_DEVELOPMENT.md).
+
 ## Migration status
 
 The workspace keeps exact registry coordinates in committed package manifests. Normal feature work may activate only the exact `moenarch-foundation` source revision declared in `.coding-tooling.source-deps.json`; the generated Cargo configuration remains ignored and uncommitted. `moenarch-text-core` and `scenedetect-core` remain registry-level compatibility/adapter dependencies rather than sibling source-workspace requirements.
