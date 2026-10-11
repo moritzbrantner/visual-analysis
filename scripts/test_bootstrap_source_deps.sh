@@ -56,6 +56,13 @@ expect_failure mixed-foundation-pins "expected one Foundation revision"
 fresh_clone
 sed -i "s/$(foundation_rev)/0000000000000000000000000000000000000000/g" "$(manifest)"
 expect_failure unresolvable-foundation-pin "cannot fetch"
+leftover="$(find "$WORK_DIR/case" -mindepth 1 -maxdepth 1 ! -name visual-analysis ! -name coding-tooling -printf '%f\n')"
+if [[ -n "$leftover" ]]; then
+  printf 'FAIL unresolvable-foundation-pin: a failed fetch left %s behind\n' "$leftover" >&2
+  failures=$((failures + 1))
+else
+  printf 'ok failed-fetch-leaves-no-sibling\n'
+fi
 
 fresh_clone
 git init --quiet "$WORK_DIR/case/moenarch-foundation"

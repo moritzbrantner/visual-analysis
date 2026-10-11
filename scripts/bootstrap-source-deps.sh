@@ -81,13 +81,24 @@ ensure_checkout() {
     printf 'source input %s: existing checkout at pinned %s\n' "$name" "$rev"
     return
   fi
-  git init --quiet "$dir"
-  git -C "$dir" fetch --quiet --depth=1 "$url" "$rev" \
-    || fail "cannot fetch $url at pinned $rev"
-  git -C "$dir" checkout --quiet --detach FETCH_HEAD
+  # Fetch into a temporary directory and move it into place only once it is
+  # complete, so an interrupted or failed fetch never leaves a half-made
+  # sibling that a rerun would refuse.
+  local partial
+  partial="$(mktemp -d "$PARENT_DIR/.$name.partial.XXXXXX")"
+  git init --quiet "$partial"
+  if ! git -C "$partial" fetch --quiet --depth=1 "$url" "$rev" \
+    || ! git -C "$partial" checkout --quiet --detach FETCH_HEAD; then
+    rm -rf "$partial"
+    fail "cannot fetch $url at pinned $rev"
+  fi
   local head
-  head="$(git -C "$dir" rev-parse HEAD)"
-  [[ "$head" == "$rev" ]] || fail "$url fetched $head instead of pinned $rev"
+  head="$(git -C "$partial" rev-parse HEAD)"
+  if [[ "$head" != "$rev" ]]; then
+    rm -rf "$partial"
+    fail "$url fetched $head instead of pinned $rev"
+  fi
+  mv "$partial" "$dir"
   printf 'source input %s: fetched %s at %s\n' "$name" "$url" "$rev"
 }
 
