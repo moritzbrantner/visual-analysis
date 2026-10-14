@@ -105,3 +105,49 @@ fn long_scene_composition_retains_slide_tracks_without_duplicate_model_work() {
         .all(|track| track.role == VideoTextRole::PresentationSlide
             && track.sample_count as usize == calls.get()));
 }
+#[test]
+fn long_scene_slide_tracks_partition_their_own_observations() {
+    let scenes = [Scene {
+        start: position(0),
+        end: position(300),
+    }];
+    let calls = Rc::new(Cell::new(0));
+    let mut source = Source {
+        info: MediaSourceInfo::recorded("long-slide").with_video(VideoStreamInfo {
+            width: 160,
+            height: 100,
+            pixel_format: PixelFormat::Rgb24,
+            frame_rate: Some(Rational64::new(5, 1)),
+        }),
+        index: 0,
+        repeated_first: false,
+    };
+    let result = analyze_scene_aware_ocr(
+        &mut source,
+        Slide(calls.clone()),
+        OcrRequest::default(),
+        "slide",
+        &scenes,
+        Some(120.0),
+    )
+    .unwrap();
+    assert_eq!(result.text_semantics.tracks.len(), 3);
+    // Every sampled frame yields one observation per slide line, so each line's
+    // track groups exactly the observations carrying that line's text.
+    let mut members = Vec::new();
+    for track in &result.text_semantics.tracks {
+        let expected = result
+            .observations
+            .iter()
+            .enumerate()
+            .filter(|(_, observation)| observation.text.as_deref() == Some(track.text.as_str()))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        assert_eq!(expected.len(), calls.get());
+        assert_eq!(track.observation_indices, expected, "{:?}", track.text);
+        assert_eq!(track.observation_indices.len(), track.sample_count as usize);
+        members.extend(track.observation_indices.iter().copied());
+    }
+    members.sort_unstable();
+    assert_eq!(members, (0..result.observations.len()).collect::<Vec<_>>());
+}

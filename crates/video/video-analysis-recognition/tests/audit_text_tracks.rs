@@ -49,7 +49,17 @@ fn neighboring_identical_text_in_one_frame_is_not_temporal_evidence() {
         .iter()
         .all(|track| track.sample_count == 2 && track.role == VideoTextRole::Subtitle));
     observations.reverse();
-    assert_eq!(analyze(&observations), result);
+    // Output is invariant under input order; member indices refer to the
+    // caller's slice, so map them back through the reversal (#77).
+    let mut reversed = analyze(&observations);
+    let last = observations.len() - 1;
+    for track in &mut reversed.tracks {
+        for index in &mut track.observation_indices {
+            *index = last - *index;
+        }
+        track.observation_indices.sort_unstable();
+    }
+    assert_eq!(reversed, result);
 }
 #[test]
 fn duplicate_same_frame_observations_do_not_create_a_subtitle() {

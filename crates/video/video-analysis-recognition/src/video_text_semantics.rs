@@ -50,6 +50,15 @@ pub struct VideoTextTrack {
     pub scene_indices: Vec<u64>,
     /// Mean OCR bounding box across observations that supplied geometry.
     pub representative_region: Option<BoundingBox>,
+    /// Member observations of this track, as indices into the `observations`
+    /// slice passed to [`analyze_video_text_semantics`].
+    ///
+    /// Sorted ascending and unique; its length equals `sample_count`. Indices of
+    /// different tracks are disjoint, and observations filtered out as non-text
+    /// or empty text belong to no track. Absent in previously serialized tracks,
+    /// which deserialize with an empty list.
+    #[serde(default)]
+    pub observation_indices: Vec<usize>,
 }
 
 /// Shared semantic claims and relations produced for video text tracks.
@@ -80,6 +89,8 @@ pub struct VideoTextSemanticContext<'a> {
 
 #[derive(Debug, Clone)]
 struct TextSample {
+    /// Index of the source observation in the slice passed to the analysis.
+    source_index: usize,
     text: String,
     normalized_text: String,
     frame: Option<u64>,
@@ -116,6 +127,7 @@ struct TrackSummary {
     representative_region: Option<BoundingBox>,
     average_ocr_score: Option<f64>,
     upstream_track_id: Option<String>,
+    observation_indices: Vec<usize>,
 }
 
 /// Builds temporal OCR tracks and projects conservative video-text semantics into
@@ -205,6 +217,7 @@ pub fn analyze_video_text_semantics(
             end_seconds: summary.end_seconds,
             scene_indices: summary.scene_indices,
             representative_region: summary.representative_region,
+            observation_indices: summary.observation_indices,
         });
     }
 
@@ -232,7 +245,8 @@ fn collect_text_samples(
 ) -> Vec<TextSample> {
     let mut samples = observations
         .iter()
-        .filter_map(|observation| {
+        .enumerate()
+        .filter_map(|(source_index, observation)| {
             let text = observation.text.as_deref()?.trim();
             if text.is_empty() || !is_visual_text_observation(observation) {
                 return None;
@@ -251,6 +265,7 @@ fn collect_text_samples(
                 .scene_index
                 .or_else(|| frame.and_then(|frame| infer_scene_index(context.scenes, frame)));
             Some(TextSample {
+                source_index,
                 text: text.to_string(),
                 normalized_text,
                 frame,
@@ -507,6 +522,14 @@ fn summarize_track(
         ])
     };
 
+    let mut observation_indices = builder
+        .samples
+        .iter()
+        .map(|sample| sample.source_index)
+        .collect::<Vec<_>>();
+    observation_indices.sort_unstable();
+    observation_indices.dedup();
+
     Ok(TrackSummary {
         id,
         text,
@@ -519,6 +542,7 @@ fn summarize_track(
         representative_region,
         average_ocr_score,
         upstream_track_id: builder.upstream_track_id,
+        observation_indices,
     })
 }
 
