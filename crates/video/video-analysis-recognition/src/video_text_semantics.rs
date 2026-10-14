@@ -50,6 +50,15 @@ pub struct VideoTextTrack {
     pub scene_indices: Vec<u64>,
     /// Mean OCR bounding box across observations that supplied geometry.
     pub representative_region: Option<BoundingBox>,
+    /// Member observations of this track, as indices into the `observations`
+    /// slice passed to [`analyze_video_text_semantics`].
+    ///
+    /// Sorted ascending and unique; its length equals `sample_count`. Indices of
+    /// different tracks are disjoint, and observations filtered out as non-text
+    /// or empty text belong to no track. Absent in previously serialized tracks,
+    /// which deserialize with an empty list.
+    #[serde(default)]
+    pub observation_indices: Vec<usize>,
 }
 
 /// Shared semantic claims and relations produced for video text tracks.
@@ -205,6 +214,8 @@ pub fn analyze_video_text_semantics(
             end_seconds: summary.end_seconds,
             scene_indices: summary.scene_indices,
             representative_region: summary.representative_region,
+            // TODO(#77): report the observations grouped into this track.
+            observation_indices: Vec::new(),
         });
     }
 

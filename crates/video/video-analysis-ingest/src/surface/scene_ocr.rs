@@ -241,6 +241,88 @@ mod tests {
         Ok(())
     }
 
+    /// Issue #77: tracks reference the analysis' own `observations` by index.
+    #[test]
+    fn scene_aware_ocr_tracks_index_their_own_observations() -> Result<()> {
+        let info = MediaSourceInfo::recorded("fixture").with_video(VideoStreamInfo {
+            width: 2,
+            height: 2,
+            frame_rate: Some(Rational64::new(30, 1)),
+            pixel_format: PixelFormat::Rgb24,
+        });
+        let frames = (0..=8).map(frame).collect::<VecDeque<_>>();
+        let mut source = FixtureSource { info, frames };
+        let scenes = vec![scene(0, 5), scene(5, 9)];
+
+        let analysis = analyze_scene_aware_ocr(
+            &mut source,
+            FixtureOcr {
+                calls: Rc::new(Cell::new(0)),
+            },
+            OcrRequest::default(),
+            "video-1",
+            &scenes,
+            Some(8.0 / 30.0),
+        )?;
+
+        // The fixture backend reads "First Slide" on the first three sampled
+        // frames (scene 0) and "Second Slide" on the rest (scene 1).
+        let expected_for = |text: &str| {
+            analysis
+                .observations
+                .iter()
+                .enumerate()
+                .filter(|(_, observation)| observation.text.as_deref() == Some(text))
+                .map(|(index, _)| index)
+                .collect::<Vec<_>>()
+        };
+        let first = expected_for("First Slide");
+        let second = expected_for("Second Slide");
+        assert_eq!(first.len(), 3);
+        assert_eq!(second.len(), 3);
+
+        let tracks = &analysis.text_semantics.tracks;
+        assert_eq!(tracks.len(), 2);
+        let track_for = |text: &str| {
+            let matching = tracks
+                .iter()
+                .filter(|track| track.text == text)
+                .collect::<Vec<_>>();
+            assert_eq!(matching.len(), 1, "one track for {text:?}");
+            matching[0]
+        };
+        assert_eq!(track_for("First Slide").observation_indices, first);
+        assert_eq!(track_for("Second Slide").observation_indices, second);
+
+        let mut seen = std::collections::BTreeSet::new();
+        for track in tracks {
+            let indices = &track.observation_indices;
+            assert!(indices.windows(2).all(|pair| pair[0] < pair[1]));
+            assert_eq!(indices.len(), track.sample_count as usize);
+            for &index in indices {
+                assert!(index < analysis.observations.len());
+                assert!(seen.insert(index), "observation {index} in two tracks");
+                let member = &analysis.observations[index];
+                assert_eq!(member.text.as_deref(), Some(track.text.as_str()));
+                let frame = member.frame.expect("OCR observations carry frames");
+                assert!(analysis.sampled_frames.contains(&frame.frame_index));
+                assert!(
+                    track
+                        .start_frame
+                        .is_some_and(|start| frame.frame_index >= start)
+                        && track.end_frame.is_some_and(|end| frame.frame_index <= end)
+                );
+                let scene_index = track.scene_indices[0] as usize;
+                assert!(
+                    frame.frame_index >= scenes[scene_index].start.frame_index
+                        && frame.frame_index < scenes[scene_index].end.frame_index
+                );
+            }
+        }
+        assert_eq!(seen.len(), analysis.observations.len());
+        Ok(())
+    }
+
     #[test]
     fn scene_aware_ocr_rejects_missing_scene_plan() {
         let info = MediaSourceInfo::recorded("fixture").with_video(VideoStreamInfo {
