@@ -4,7 +4,7 @@
   "description": "React app for video-analysis-tracking: IoU-based object tracking for video-analysis.",
   "private": true,
   "type": "module",
-  "packageManager": "bun@1.4.2",
+  "packageManager": "bun@1.4.3",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc -p tsconfig.json && vite build",
@@ -24,7 +24,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "autoprefixer": "10.6.1",
-    "postcss": "8.5.29",
+    "postcss": "8.5.30",
     "tailwindcss": "3.4.19",
     "typescript": "6.0.3"
   }
