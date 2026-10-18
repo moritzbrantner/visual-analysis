@@ -300,7 +300,9 @@ fn recognize_value(input: RecognizeInput) -> Result<serde_json::Value, String> {
     let model = input
         .model
         .unwrap_or_else(|| "trocr-base-printed-onnx".to_string());
-    let preset = model.parse::<OcrPreset>().map_err(|error| error.to_string())?;
+    let preset = model
+        .parse::<OcrPreset>()
+        .map_err(|error| error.to_string())?;
     if !matches!(
         preset,
         OcrPreset::TrOcrBasePrintedOnnx | OcrPreset::TrOcrBaseHandwrittenOnnx
@@ -324,8 +326,8 @@ fn recognize_value(input: RecognizeInput) -> Result<serde_json::Value, String> {
         local_options.bundle_root = PathBuf::from(model_root);
     }
     let bundle_path = local_options.bundle_root.display().to_string();
-    let mut backend = OnnxTrOcrBackend::from_local_model(local_options)
-        .map_err(|error| error.to_string())?;
+    let mut backend =
+        OnnxTrOcrBackend::from_local_model(local_options).map_err(|error| error.to_string())?;
     if let Some(max_new_tokens) = input.max_new_tokens {
         backend.options.max_new_tokens = max_new_tokens;
     }
