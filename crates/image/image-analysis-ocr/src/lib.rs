@@ -866,12 +866,21 @@ impl<'a> SpanAlignment<'a> {
 }
 
 fn text_span(text: &str, byte_start: usize, byte_end: usize) -> TextSpan {
-    TextSpan {
-        byte_start,
-        byte_end,
-        char_start: text[..byte_start].chars().count(),
-        char_end: text[..byte_end].chars().count(),
-    }
+    // The registry text-core contract also requires scalar offsets, while its canonical
+    // source contract stores byte offsets only. Construct through their shared serialized
+    // boundary instead of depending on either version's Rust struct layout. Unknown legacy
+    // fields are ignored by the byte-only contract; no coordinates are discarded by the old one.
+    let coordinates = [
+        ("byte_start", byte_start),
+        ("byte_end", byte_end),
+        ("char_start", text[..byte_start].chars().count()),
+        ("char_end", text[..byte_end].chars().count()),
+    ];
+    TextSpan::deserialize(serde::de::value::MapDeserializer::<
+        _,
+        serde::de::value::Error,
+    >::new(coordinates.into_iter()))
+    .expect("both text-core span contracts accept these unsigned coordinate fields")
 }
 
 /// Trait for OCR backend implementations.
