@@ -56,9 +56,8 @@ PY
 # Toolchains track the latest stable release (owner decision 2026-10-23): declarations are
 # minimums, so any installed Bun, Node or Rust release satisfies them.
 if [[ -n "$desired_bun" ]]; then
-  if ! command -v bun >/dev/null 2>&1; then
-    printf 'Bun is required (packageManager bun@%s) but is not installed; install the latest stable Bun before running this script\n' "$desired_bun" >&2
-    exit 2
+  if ! command -v bun >/dev/null 2>&1 && [[ ! -x "$HOME/.bun/bin/bun" ]]; then
+    curl -fsSL https://bun.sh/install | bash
   fi
   if [[ -d "$HOME/.bun/bin" ]]; then
     export PATH="$HOME/.bun/bin:$PATH"
