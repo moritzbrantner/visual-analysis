@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 env:
-  CODING_TOOLING_REV: 0c4cf3d19ec62c03002fd123bc7c2d0dcdd02628
+  CODING_TOOLING_REV: 2ceb2b57c946fd042fdf098c05427519c146a62f
 
 jobs:
   cold-setup:
@@ -44,7 +44,7 @@ jobs:
       - name: Bootstrap fingerprint tooling runtime
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.4.3
+          bun-version: latest
 
       - name: Checkout fingerprint verifier
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

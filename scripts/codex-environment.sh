@@ -53,16 +53,28 @@ if path.is_file():
         print(value.split('@', 1)[1])
 PY
 )"
+# Toolchains track the latest stable release (owner decision 2026-10-23): declarations are
+# minimums, so any installed Bun, Node or Rust release satisfies them.
 if [[ -n "$desired_bun" ]]; then
-  if ! [[ "$desired_bun" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    printf 'Bun packageManager must use an exact version, got %s\n' "$desired_bun" >&2
-    exit 2
+  if ! command -v bun >/dev/null 2>&1 && [[ ! -x "$HOME/.bun/bin/bun" ]]; then
+    curl -fsSL https://bun.sh/install | bash
   fi
-  if ! command -v bun >/dev/null 2>&1 || [[ "$(bun --version)" != "$desired_bun" ]]; then
-    curl -fsSL https://bun.sh/install | bash -s "bun-v${desired_bun}"
+  if [[ -d "$HOME/.bun/bin" ]]; then
+    export PATH="$HOME/.bun/bin:$PATH"
+    publish_path "$HOME/.bun/bin"
   fi
-  export PATH="$HOME/.bun/bin:$PATH"
-  publish_path "$HOME/.bun/bin"
+fi
+
+desired_node="$(python3 - "$root/.node-version" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+if path.is_file():
+    print(path.read_text().strip())
+PY
+)"
+if [[ -n "$desired_node" ]] && ! command -v node >/dev/null 2>&1; then
+  printf 'Node is required (.node-version %s) but is not installed; install the latest stable Node before running this script\n' "$desired_node" >&2
+  exit 2
 fi
 
 rust_toolchain="$(python3 - "$root/rust-toolchain.toml" <<'PY'
@@ -74,15 +86,12 @@ if path.is_file():
 PY
 )"
 if [[ -n "$rust_toolchain" ]]; then
-  if ! [[ "$rust_toolchain" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    printf 'Rust toolchain must use an exact version, got %s\n' "$rust_toolchain" >&2
+  if ! command -v rustup >/dev/null 2>&1; then
+    printf 'rustup is required to provision Rust %s; install rustup before running this script\n' "$rust_toolchain" >&2
     exit 2
   fi
-  if ! command -v rustup >/dev/null 2>&1; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-    export PATH="$HOME/.cargo/bin:$PATH"
-  fi
   if [[ -d "$HOME/.cargo/bin" ]]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
     publish_path "$HOME/.cargo/bin"
   fi
   rustup toolchain install "$rust_toolchain" --profile minimal
@@ -110,15 +119,3 @@ PY
 for command in "${environment_commands[@]}"; do
   (cd "$root" && bash -lc "$command")
 done
-
-if [[ -n "$desired_bun" && "$(bun --version)" != "$desired_bun" ]]; then
-  # Bun tracks latest (owner decision 2026-10-21); packageManager is informational.
-  printf 'Bun differs from packageManager (declared %s, observed %s); continuing\n' "$desired_bun" "$(bun --version)" >&2
-fi
-if [[ -n "$rust_toolchain" ]]; then
-  observed_rust="$(cd "$root" && rustc --version | awk '{print $2}')"
-  if [[ "$observed_rust" != "$rust_toolchain" ]]; then
-    printf 'Rust preflight mismatch: expected %s, got %s\n' "$rust_toolchain" "$observed_rust" >&2
-    exit 1
-  fi
-fi
