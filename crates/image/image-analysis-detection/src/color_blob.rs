@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use image_analysis_core::ImageView;
+use image_analysis_core::{ImagePixelFormat, ImageView};
 use video_analysis_core::{BoundingBox, DetectError, Result, VideoFrame};
 
 use crate::{FrameDetections, ImageDetection};
@@ -138,18 +138,31 @@ fn validate_color_blob_options(options: &ColorBlobDetectionOptions) -> Result<()
 }
 
 fn build_color_mask(image: ImageView<'_>, options: &ColorBlobDetectionOptions) -> Vec<bool> {
-    let mut mask = vec![false; image.width as usize * image.height as usize];
-    for y in 0..image.height {
-        for x in 0..image.width {
-            let [red, green, blue] = image.pixel_rgb(x, y);
-            let active = match options.target {
+    let width = image.width as usize;
+    let bytes_per_pixel = image.pixel_format.bytes_per_pixel();
+    let [red_offset, green_offset, blue_offset] = match image.pixel_format {
+        ImagePixelFormat::Rgb24 => [0, 1, 2],
+        ImagePixelFormat::Bgr24 => [2, 1, 0],
+        ImagePixelFormat::Gray8 => [0, 0, 0],
+    };
+    let mut mask = vec![false; width * image.height as usize];
+    for (row, mask_row) in image
+        .data
+        .chunks(image.stride)
+        .zip(mask.chunks_exact_mut(width))
+    {
+        for (pixel, active) in row[..width * bytes_per_pixel]
+            .chunks_exact(bytes_per_pixel)
+            .zip(mask_row)
+        {
+            let (red, green, blue) = (pixel[red_offset], pixel[green_offset], pixel[blue_offset]);
+            *active = match options.target {
                 TargetColor::Red => {
                     red >= options.min_red
                         && (red as f32) >= options.dominance_ratio * green as f32
                         && (red as f32) >= options.dominance_ratio * blue as f32
                 }
             };
-            mask[y as usize * image.width as usize + x as usize] = active;
         }
     }
     mask
@@ -160,18 +173,17 @@ fn erode_3x3(width: usize, height: usize, mask: &[bool]) -> Vec<bool> {
     if width < 3 || height < 3 {
         return out;
     }
+    let mut columns = vec![false; width];
     for y in 1..height - 1 {
-        for x in 1..width - 1 {
-            let mut active = true;
-            'neighbors: for yy in y - 1..=y + 1 {
-                for xx in x - 1..=x + 1 {
-                    if !mask[yy * width + xx] {
-                        active = false;
-                        break 'neighbors;
-                    }
-                }
+        columns.fill(true);
+        for row in mask[(y - 1) * width..(y + 2) * width].chunks_exact(width) {
+            for (column, &value) in columns.iter_mut().zip(row) {
+                *column &= value;
             }
-            out[y * width + x] = active;
+        }
+        let out_row = &mut out[y * width..(y + 1) * width];
+        for (active, window) in out_row[1..width - 1].iter_mut().zip(columns.windows(3)) {
+            *active = window[0] & window[1] & window[2];
         }
     }
     out
@@ -182,22 +194,20 @@ fn dilate_3x3(width: usize, height: usize, mask: &[bool]) -> Vec<bool> {
     if width == 0 || height == 0 {
         return out;
     }
+    let mut columns = vec![false; width];
     for y in 0..height {
-        for x in 0..width {
-            let y0 = y.saturating_sub(1);
-            let x0 = x.saturating_sub(1);
-            let y1 = (y + 1).min(height - 1);
-            let x1 = (x + 1).min(width - 1);
-            let mut active = false;
-            'neighbors: for yy in y0..=y1 {
-                for xx in x0..=x1 {
-                    if mask[yy * width + xx] {
-                        active = true;
-                        break 'neighbors;
-                    }
-                }
+        columns.fill(false);
+        let rows = y.saturating_sub(1)..(y + 2).min(height);
+        for row in mask[rows.start * width..rows.end * width].chunks_exact(width) {
+            for (column, &value) in columns.iter_mut().zip(row) {
+                *column |= value;
             }
-            out[y * width + x] = active;
+        }
+        let out_row = &mut out[y * width..(y + 1) * width];
+        for (x, active) in out_row.iter_mut().enumerate() {
+            let left = x.saturating_sub(1);
+            let right = (x + 1).min(width - 1);
+            *active = columns[left] | columns[x] | columns[right];
         }
     }
     out
@@ -275,4 +285,75 @@ fn connected_components(
         }
     }
     detections
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn neighborhood(width: usize, height: usize, x: usize, y: usize) -> Vec<usize> {
+        let mut indices = Vec::new();
+        for yy in y.saturating_sub(1)..=(y + 1).min(height - 1) {
+            for xx in x.saturating_sub(1)..=(x + 1).min(width - 1) {
+                indices.push(yy * width + xx);
+            }
+        }
+        indices
+    }
+
+    #[test]
+    fn morphology_matches_per_pixel_definition_for_every_small_mask() {
+        for (width, height) in [(1, 1), (1, 4), (4, 1), (2, 3), (3, 3), (4, 3), (3, 4), (4, 4)] {
+            for bits in 0..1_u32 << (width * height) {
+                let mask = (0..width * height)
+                    .map(|index| bits >> index & 1 == 1)
+                    .collect::<Vec<_>>();
+                let eroded = erode_3x3(width, height, &mask);
+                let dilated = dilate_3x3(width, height, &mask);
+                for y in 0..height {
+                    for x in 0..width {
+                        let around = neighborhood(width, height, x, y);
+                        let interior = x > 0 && y > 0 && x + 1 < width && y + 1 < height;
+                        assert_eq!(
+                            eroded[y * width + x],
+                            interior && around.iter().all(|&index| mask[index])
+                        );
+                        assert_eq!(
+                            dilated[y * width + x],
+                            around.iter().any(|&index| mask[index])
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn color_mask_matches_pixel_rgb_across_formats_and_stride_padding() {
+        let options = ColorBlobDetectionOptions::default();
+        for format in [
+            ImagePixelFormat::Rgb24,
+            ImagePixelFormat::Bgr24,
+            ImagePixelFormat::Gray8,
+        ] {
+            let (width, height, stride) = (5_u32, 3_u32, 5 * format.bytes_per_pixel() + 2);
+            let data = (0..stride * height as usize)
+                .map(|index| (index * 37 % 251) as u8)
+                .collect::<Vec<_>>();
+            let image = ImageView::new(width, height, format, &data, stride).unwrap();
+            let mask = build_color_mask(image, &options);
+            let mut active = 0;
+            for y in 0..height {
+                for x in 0..width {
+                    let [red, green, blue] = image.pixel_rgb(x, y);
+                    let expected = red >= options.min_red
+                        && red as f32 >= options.dominance_ratio * green as f32
+                        && red as f32 >= options.dominance_ratio * blue as f32;
+                    active += usize::from(expected);
+                    assert_eq!(mask[(y * width + x) as usize], expected);
+                }
+            }
+            assert_eq!(mask.iter().filter(|value| **value).count(), active);
+        }
+    }
 }
