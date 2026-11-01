@@ -13,6 +13,19 @@ Each family retains library, CLI, server, Rust WASM, app, and Bun WASM surfaces:
 108 Cargo packages and 54 Bun packages. The focused UI is one additional
 destination-authored private package and is not part of the source count.
 
+Migrated library-only packages (rust-packages#179, from rust-packages
+`81a327cddc88c1584368fbfc1e16357ecb88f179`):
+
+- `moenarch-video-analysis-posture`: 2D/3D pose estimation, skeletons, ONNX
+  pose estimator and lifter adapters, posture geometry.
+- `moenarch-video-analysis-posture-io`: COCO-style posture I/O and stick-figure
+  export.
+
+They carry no CLI, server, WASM or app wrappers, and do not depend on spatial
+packages: the former `three-d-processing-core` geometry is replaced by
+posture-owned `Point3`/`Vector3`/`LineSegment3` with the same serialized shape.
+Total: 110 Cargo packages.
+
 ComfyUI and spatial packages are excluded. `scenedetect-core` owns canonical
 scene algorithms; visual-analysis owns adapters, visual pipeline contracts,
 general FFmpeg integration, output extensions, and split planning.

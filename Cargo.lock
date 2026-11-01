@@ -2251,6 +2251,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "moenarch-video-analysis-posture"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "moenarch-image-analysis-core",
+ "moenarch-image-analysis-processing",
+ "moenarch-math-geometry-2d",
+ "moenarch-model-runtime",
+ "moenarch-runtime-core",
+ "moenarch-runtime-onnx",
+ "moenarch-video-analysis-core",
+ "num-rational",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "moenarch-video-analysis-posture-io"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "moenarch-runtime-core",
+ "moenarch-video-analysis-core",
+ "moenarch-video-analysis-posture",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "moenarch-video-analysis-recognition"
 version = "0.1.0"
 dependencies = [

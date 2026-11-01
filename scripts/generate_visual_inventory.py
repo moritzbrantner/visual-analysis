@@ -14,6 +14,14 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE_SHA = "b8b29cf8db0b86ed1b133a18155adf24992f9483"
 SOURCE_REPOSITORY = "moritzbrantner/rust-packages"
 DESTINATION_REPOSITORY = "moritzbrantner/visual-analysis"
+# Library-only packages moved here after the bootstrap extraction
+# (rust-packages#179). Their ownership records come from this later
+# rust-packages commit; their CLI/server/WASM/app wrappers were dropped.
+MIGRATION_SOURCE_SHA = "81a327cddc88c1584368fbfc1e16357ecb88f179"
+MIGRATED_LIBRARIES = (
+    "moenarch-video-analysis-posture",
+    "moenarch-video-analysis-posture-io",
+)
 IMAGE_FAMILIES = (
     "captioning",
     "classification",
@@ -106,6 +114,37 @@ def generate(source: Path) -> None:
             f"source ownership must contain 108 Cargo and 54 Bun records, found {len(cargo_records)}/{len(bun_records)}"
         )
 
+    git(source, "cat-file", "-e", f"{MIGRATION_SOURCE_SHA}^{{commit}}")
+    migration_source = json.loads(
+        git(
+            source,
+            "show",
+            f"{MIGRATION_SOURCE_SHA}:docs/repository-split/package-ownership.json",
+        )
+    )
+    migrated_records = []
+    for record in migration_source["packages"]:
+        if record.get("current_package_name") not in MIGRATED_LIBRARIES:
+            continue
+        migrated_records.append(
+            {
+                **record,
+                "extraction_phase": "posture",
+                "intended_next_release_owner": DESTINATION_REPOSITORY,
+                "migration_status": "moved from rust-packages (rust-packages#179); library only",
+                "provenance": {
+                    "kind": "migrated-library",
+                    "source_commit": MIGRATION_SOURCE_SHA,
+                    "adaptation": "three-d-processing-core geometry replaced by posture-owned Point3/Vector3/LineSegment3",
+                },
+                "target_repository": "visual-analysis",
+            }
+        )
+    if len(migrated_records) != len(MIGRATED_LIBRARIES):
+        raise SystemExit(
+            f"migration source must contain {len(MIGRATED_LIBRARIES)} posture records, found {len(migrated_records)}"
+        )
+
     adapter_record = {
         "automatic_publish_eligible": False,
         "contract_owner": "visual-app-ui",
@@ -148,13 +187,14 @@ def generate(source: Path) -> None:
             "cargo_source_packages": len(cargo_records),
             "bun_source_packages": len(bun_records),
             "destination_authored_packages": 1,
+            "migrated_library_packages": len(migrated_records),
         },
-        "packages": source_records + [adapter_record],
+        "packages": source_records + migrated_records + [adapter_record],
     }
     write_json(ROOT / "docs/repository-split/package-ownership.json", ownership)
 
     release_packages = []
-    for record in cargo_records:
+    for record in cargo_records + migrated_records:
         manifest = ROOT / record["manifest_path"]
         package = tomllib.loads(manifest.read_text())["package"]
         raw_version = package.get("version")

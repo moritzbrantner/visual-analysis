@@ -68,6 +68,8 @@ video-analysis-features = { package = "moenarch-video-analysis-features", versio
 video-analysis-ffmpeg = { package = "moenarch-video-analysis-ffmpeg", version = "=0.1.1", path = "crates/video/video-analysis-ffmpeg" }
 video-analysis-ingest = { package = "moenarch-video-analysis-ingest", version = "=0.1.0", path = "crates/video/video-analysis-ingest" }
 video-analysis-output = { package = "moenarch-video-analysis-output", version = "=0.1.0", path = "crates/video/video-analysis-output" }
+video-analysis-posture = { package = "moenarch-video-analysis-posture", version = "=0.1.0", path = "crates/video/video-analysis-posture" }
+video-analysis-posture-io = { package = "moenarch-video-analysis-posture-io", version = "=0.1.0", path = "crates/video/video-analysis-posture-io" }
 video-analysis-recognition = { package = "moenarch-video-analysis-recognition", version = "=0.1.0", path = "crates/video/video-analysis-recognition" }
 video-analysis-segmentation = { package = "moenarch-video-analysis-segmentation", version = "=0.1.0", path = "crates/video/video-analysis-segmentation" }
 video-analysis-split = { package = "moenarch-video-analysis-split", version = "=0.1.0", path = "crates/video/video-analysis-split" }
