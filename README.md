@@ -7,6 +7,9 @@ The bootstrap freezes source commit
 `b8b29cf8db0b86ed1b133a18155adf24992f9483` and owns exactly 27 visual
 families: 108 Cargo packages and 54 source-derived Bun packages. A private,
 destination-authored `@moritzbrantner/visual-app-ui` adapter serves the 27 apps.
+Two library-only posture crates (`video-analysis-posture`,
+`video-analysis-posture-io`) moved in later from rust-packages
+(rust-packages#179), for 110 Cargo packages in total.
 
 For the Rust packages assigned to `visual-analysis`, this repository is the canonical source, test, issue, version, and release authority. Historical copies in `rust-packages` are compatibility/provenance material and must not become a competing implementation or publication source. Ownership does not itself authorize publication, tags, or historical source removal.
 

@@ -10,7 +10,7 @@ Read `CONTEXT.md`, `docs/PROVENANCE.md`, `docs/OWNERSHIP.md`, `docs/SOURCE_DEVEL
 
 ## Boundaries
 
-- Keep exactly the 27 source families classified in the ownership inventory.
+- Keep exactly the 27 source families plus the two migrated library-only posture crates classified in the ownership inventory.
 - Do not add ComfyUI or spatial packages, spatial reverse dependencies, sibling repository paths, moving Git dependencies, or rust-packages test support to committed package manifests.
 - Keep exact registry coordinates in package manifests. Normal source development temporarily replaces only the declared `moenarch-foundation` packages through the managed, ignored Cargo configuration.
 - Do not add NLP or scene-detection repositories to the normal source workspace. Existing `text-core` usage is a compatibility/data-contract surface; `scenedetect-core` crosses through explicit detector adapters. New cross-domain behavior belongs in an adapter or consuming application.

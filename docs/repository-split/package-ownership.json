@@ -4,7 +4,8 @@
     "bun_source_packages": 54,
     "cargo_source_packages": 108,
     "destination_authored_packages": 1,
-    "families": 27
+    "families": 27,
+    "migrated_library_packages": 2
   },
   "packages": [
     {
@@ -3441,6 +3442,58 @@
       "target_repository": "visual-analysis",
       "temporary_boundary_violations": [],
       "wrapped_library": "moenarch-vision-core"
+    },
+    {
+      "automatic_publish_eligible": true,
+      "contract_owner": "moenarch-video-analysis-posture",
+      "current_domain": "video",
+      "current_package_name": "moenarch-video-analysis-posture",
+      "current_published_version": "0.1.0",
+      "current_release_workflow": "manual docs/RELEASE_CHECKLIST.md",
+      "ecosystem": "cargo",
+      "extraction_phase": "posture",
+      "id": "cargo:moenarch-video-analysis-posture",
+      "intended_next_release_owner": "moritzbrantner/visual-analysis",
+      "intended_package_name": "moenarch-video-analysis-posture",
+      "manifest_path": "crates/video/video-analysis-posture/Cargo.toml",
+      "migration_status": "moved from rust-packages (rust-packages#179); library only",
+      "package_kind": "library",
+      "provenance": {
+        "adaptation": "three-d-processing-core geometry replaced by posture-owned Point3/Vector3/LineSegment3",
+        "kind": "migrated-library",
+        "source_commit": "81a327cddc88c1584368fbfc1e16357ecb88f179"
+      },
+      "publication_class": "crates.io",
+      "source_version": "0.1.0",
+      "target_repository": "visual-analysis",
+      "temporary_boundary_violations": [],
+      "wrapped_library": null
+    },
+    {
+      "automatic_publish_eligible": true,
+      "contract_owner": "moenarch-video-analysis-posture-io",
+      "current_domain": "video",
+      "current_package_name": "moenarch-video-analysis-posture-io",
+      "current_published_version": null,
+      "current_release_workflow": "manual docs/RELEASE_CHECKLIST.md",
+      "ecosystem": "cargo",
+      "extraction_phase": "posture",
+      "id": "cargo:moenarch-video-analysis-posture-io",
+      "intended_next_release_owner": "moritzbrantner/visual-analysis",
+      "intended_package_name": "moenarch-video-analysis-posture-io",
+      "manifest_path": "crates/video/video-analysis-posture-io/Cargo.toml",
+      "migration_status": "moved from rust-packages (rust-packages#179); library only",
+      "package_kind": "library",
+      "provenance": {
+        "adaptation": "three-d-processing-core geometry replaced by posture-owned Point3/Vector3/LineSegment3",
+        "kind": "migrated-library",
+        "source_commit": "81a327cddc88c1584368fbfc1e16357ecb88f179"
+      },
+      "publication_class": "crates.io",
+      "source_version": "0.1.0",
+      "target_repository": "visual-analysis",
+      "temporary_boundary_violations": [],
+      "wrapped_library": null
     },
     {
       "automatic_publish_eligible": false,

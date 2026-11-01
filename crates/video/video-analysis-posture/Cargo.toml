@@ -1,0 +1,35 @@
+[package]
+name = "moenarch-video-analysis-posture"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Pose and skeleton helpers for video-analysis."
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+name = "video_analysis_posture"
+
+[dependencies]
+runtime-core.workspace = true
+image-analysis-core.workspace = true
+image-analysis-processing.workspace = true
+model-runtime.workspace = true
+runtime-onnx.workspace = true
+serde_json.workspace = true
+math-geometry-2d.workspace = true
+serde.workspace = true
+video-analysis-core.workspace = true
+
+[features]
+default = []
+onnx = ["runtime-onnx/onnxruntime"]
+
+[dev-dependencies]
+image.workspace = true
+num-rational.workspace = true

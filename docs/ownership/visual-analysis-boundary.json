@@ -6,6 +6,7 @@
   "ownedCapabilities": [
     "general-video-processing-adapters",
     "image-analysis",
+    "posture-estimation",
     "scene-detector-adapters",
     "visual-pipeline-contracts",
     "visual-wasm-and-app-surfaces"

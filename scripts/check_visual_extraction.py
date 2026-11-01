@@ -35,16 +35,18 @@ REQUIRED_REGISTRY_PACKAGES = (
 )
 FORBIDDEN_DEPENDENCIES = {
     "three-d-processing-core",
-    "video-analysis-posture",
     "video-analysis-test-support",
+}
+# Library-only packages moved in after the bootstrap (rust-packages#179).
+MIGRATED_LIBRARY_MANIFESTS = {
+    "crates/video/video-analysis-posture/Cargo.toml",
+    "crates/video/video-analysis-posture-io/Cargo.toml",
 }
 FORBIDDEN_PATH_PARTS = {
     "comfyui",
     "three-d",
     "video-analysis-gaussian-splatting",
     "video-analysis-mvs",
-    "video-analysis-posture",
-    "video-analysis-posture-io",
     "video-analysis-radiance-fields",
     "video-analysis-radiance-io",
     "video-analysis-radiance-pipeline",
@@ -139,8 +141,16 @@ def validate() -> list[str]:
         for path in (ROOT / "packages").glob("*/package.json")
         if path.parent.name != "visual-app-ui"
     )
-    if len(cargo_manifests) != 108:
-        errors.append(f"expected 108 Cargo manifests, found {len(cargo_manifests)}")
+    migrated_manifests = {
+        str(path.relative_to(ROOT)) for path in cargo_manifests
+    } & MIGRATED_LIBRARY_MANIFESTS
+    if migrated_manifests != MIGRATED_LIBRARY_MANIFESTS:
+        errors.append(
+            "missing migrated library manifests: "
+            + ", ".join(sorted(MIGRATED_LIBRARY_MANIFESTS - migrated_manifests))
+        )
+    if len(cargo_manifests) != 108 + len(MIGRATED_LIBRARY_MANIFESTS):
+        errors.append(f"expected 110 Cargo manifests, found {len(cargo_manifests)}")
     if len(source_bun_manifests) != 54:
         errors.append(f"expected 54 source Bun manifests, found {len(source_bun_manifests)}")
 
@@ -226,6 +236,7 @@ def validate() -> list[str]:
         "cargo_source_packages": 108,
         "bun_source_packages": 54,
         "destination_authored_packages": 1,
+        "migrated_library_packages": len(MIGRATED_LIBRARY_MANIFESTS),
     }
     if inventory != expected_inventory:
         errors.append(f"ownership inventory mismatch: {inventory!r}")
@@ -235,8 +246,8 @@ def validate() -> list[str]:
     release = load_json(ROOT / "docs/repository-split/release-plan.json")
     if release.get("publication_authorized") is not False:
         errors.append("bootstrap release inventory must not authorize publication")
-    if release.get("package_count") != 108:
-        errors.append("release inventory must enumerate 108 Cargo packages")
+    if release.get("package_count") != 108 + len(MIGRATED_LIBRARY_MANIFESTS):
+        errors.append("release inventory must enumerate 110 Cargo packages")
 
     identity = load_json(ROOT / "docs/repository-split/source-byte-identity.json")
     if identity.get("source_commit") != SOURCE_SHA:

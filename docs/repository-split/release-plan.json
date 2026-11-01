@@ -11,7 +11,7 @@
       "version": "0.1.0"
     }
   ],
-  "package_count": 108,
+  "package_count": 110,
   "packages": [
     {
       "manifest_path": "crates/image/image-analysis-captioning/Cargo.toml",
@@ -391,6 +391,16 @@
     {
       "manifest_path": "crates/bindings/video-analysis-output-wasm/Cargo.toml",
       "name": "moenarch-video-analysis-output-wasm",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-posture/Cargo.toml",
+      "name": "moenarch-video-analysis-posture",
+      "source_version": "0.1.0"
+    },
+    {
+      "manifest_path": "crates/video/video-analysis-posture-io/Cargo.toml",
+      "name": "moenarch-video-analysis-posture-io",
       "source_version": "0.1.0"
     },
     {
