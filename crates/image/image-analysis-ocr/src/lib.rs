@@ -1576,7 +1576,17 @@ fn model_runtime_error(error: model_runtime::ModelRuntimeError) -> DetectError {
         }
         model_runtime::ModelRuntimeError::Source(message) => DetectError::Source(message),
         model_runtime::ModelRuntimeError::Io(error) => DetectError::Io(error),
+        model_runtime::ModelRuntimeError::Cancelled => {
+            DetectError::Source("OCR model acquisition was cancelled".to_string())
+        }
     }
+}
+
+#[cfg(all(test, feature = "local-onnx"))]
+#[test]
+fn cancelled_model_acquisition_is_reported_as_a_failure() {
+    let error = model_runtime_error(model_runtime::ModelRuntimeError::Cancelled);
+    assert!(error.to_string().contains("cancelled"));
 }
 
 #[cfg(not(feature = "local-onnx"))]
