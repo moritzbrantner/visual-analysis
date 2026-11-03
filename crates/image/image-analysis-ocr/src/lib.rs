@@ -1576,17 +1576,12 @@ fn model_runtime_error(error: model_runtime::ModelRuntimeError) -> DetectError {
         }
         model_runtime::ModelRuntimeError::Source(message) => DetectError::Source(message),
         model_runtime::ModelRuntimeError::Io(error) => DetectError::Io(error),
-        model_runtime::ModelRuntimeError::Cancelled => {
-            DetectError::Source("OCR model acquisition was cancelled".to_string())
-        }
+        // The standalone visual-analysis and downstream corpus builds can pin
+        // different Foundation revisions. New runtime error variants must remain
+        // visible to OCR callers without requiring an in-lockstep release.
+        #[allow(unreachable_patterns)]
+        other => DetectError::Source(other.to_string()),
     }
-}
-
-#[cfg(all(test, feature = "local-onnx"))]
-#[test]
-fn cancelled_model_acquisition_is_reported_as_a_failure() {
-    let error = model_runtime_error(model_runtime::ModelRuntimeError::Cancelled);
-    assert!(error.to_string().contains("cancelled"));
 }
 
 #[cfg(not(feature = "local-onnx"))]
