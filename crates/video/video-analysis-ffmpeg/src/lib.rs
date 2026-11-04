@@ -692,7 +692,7 @@ fn probe_exact_frame_times(path: &Path) -> std::result::Result<ExactFrameTimes, 
         .arg("v:0")
         .arg("-show_frames")
         .arg("-show_entries")
-        .arg("stream=time_base:frame=pts,pkt_duration")
+        .arg("stream=time_base:frame=pts,duration,pkt_duration")
         .arg("-of")
         .arg("json")
         .arg(path)
@@ -758,12 +758,18 @@ fn parse_exact_frame_times(json: &[u8]) -> std::result::Result<ExactFrameTimes, 
         });
     }
     let last_frame = frames.last().unwrap();
-    let last_duration = exact_pts(&last_frame["pkt_duration"], "last frame pkt_duration")?;
-    if last_duration <= 0 {
-        return Err(FfmpegError::InvalidMetadata(
-            "last frame duration must be positive for an exact exclusive end".into(),
-        ));
-    }
+    // FFprobe 7+ reports `duration` and may omit the deprecated
+    // `pkt_duration` (older FFprobe versions still report the latter).
+    // Never infer the final duration from average FPS or neighboring frames.
+    let last_duration = ["duration", "pkt_duration"]
+        .into_iter()
+        .filter_map(|field| exact_pts(&last_frame[field], field).ok())
+        .find(|duration| *duration > 0)
+        .ok_or_else(|| {
+            FfmpegError::InvalidMetadata(
+                "last frame needs a positive integer duration for an exact exclusive end".into(),
+            )
+        })?;
     let last = *positions.last().unwrap();
     let end_pts = last.timestamp.pts.checked_add(last_duration).ok_or_else(|| {
         FfmpegError::InvalidMetadata("last frame exclusive PTS overflows i64".into())
@@ -1919,6 +1925,32 @@ mod tests {
         );
         assert_eq!(times.end_exclusive.frame_index, 3);
         assert_eq!(times.end_exclusive.timestamp.pts, 45_000);
+
+        let duration_only = br#"{
+            "frames": [{"pts": 18000}, {"pts": 36000, "duration": 9000}],
+            "streams": [{"time_base": "1/90000"}]
+        }"#;
+        assert_eq!(
+            parse_exact_frame_times(duration_only)
+                .unwrap()
+                .end_exclusive
+                .timestamp
+                .pts,
+            45_000
+        );
+        let both = br#"{
+            "frames": [{"pts": 36000, "duration": 9000, "pkt_duration": 12000}],
+            "streams": [{"time_base": "1/90000"}]
+        }"#;
+        assert_eq!(
+            parse_exact_frame_times(both)
+                .unwrap()
+                .end_exclusive
+                .timestamp
+                .pts,
+            45_000,
+            "FFprobe's current duration field takes precedence"
+        );
 
         for malformed in [
             br#"{"frames":[{"pts":9000}],"streams":[{"time_base":"1/90000"}]}"#.as_slice(),
