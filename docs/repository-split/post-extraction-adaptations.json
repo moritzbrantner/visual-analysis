@@ -47,6 +47,7 @@
     "crates/video/video-analysis-recognition/src/lib.rs",
     "crates/video/video-analysis-recognition/src/model_analyzers.rs",
     "crates/video/video-analysis-recognition/src/model_predictions.rs",
+    "crates/video/video-analysis-storage/tests/public_roundtrip.rs",
     "crates/video/video-analysis-synthesis/src/surface.rs",
     "crates/video/video-analysis-tracking/benches/collision.rs",
     "crates/video/video-analysis-transform/src/lib.rs",
