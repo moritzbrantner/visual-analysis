@@ -52,12 +52,6 @@
         "localPath": "../moenarch-foundation/crates/runtime/runtime-core"
       },
       {
-        "package": "moenarch-runtime-onnx",
-        "git": "https://github.com/moritzbrantner/moenarch-foundation",
-        "rev": "d257917b4d72da581e3de707ea4c94d07afe6cfd",
-        "localPath": "../moenarch-foundation/crates/runtime/runtime-onnx"
-      },
-      {
         "package": "moenarch-semantic-core",
         "git": "https://github.com/moritzbrantner/moenarch-foundation",
         "rev": "d257917b4d72da581e3de707ea4c94d07afe6cfd",
