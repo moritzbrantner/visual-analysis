@@ -74,7 +74,12 @@ pub fn write_jsonl(path: impl AsRef<Path>, dataset: &AnalysisDataset) -> Result<
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
     for record in &dataset.records {
-        let line = serde_json::to_string(record).map_err(json_error)?;
+        let line = if dataset.metadata.schema_version == 3 {
+            let canonical = record.canonical_v3_value().map_err(StorageError::Json)?;
+            serde_json::to_string(&canonical).map_err(json_error)?
+        } else {
+            serde_json::to_string(record).map_err(json_error)?
+        };
         writer.write_all(line.as_bytes())?;
         writer.write_all(b"\n")?;
     }
@@ -92,7 +97,9 @@ pub fn read_jsonl(path: impl AsRef<Path>) -> Result<AnalysisDataset> {
         if line.trim().is_empty() {
             continue;
         }
-        let record = serde_json::from_str::<DatasetRecord>(&line)
+        let value = serde_json::from_str::<serde_json::Value>(&line)
+            .map_err(|err| StorageError::Json(format!("line {}: {err}", line_index + 1)))?;
+        let record = DatasetRecord::from_canonical_v3_value(value)
             .map_err(|err| StorageError::Json(format!("line {}: {err}", line_index + 1)))?;
         dataset.push(record);
     }
@@ -286,6 +293,40 @@ mod tests {
 
         let err = read_jsonl(&path).unwrap_err();
         assert!(matches!(err, StorageError::Json(message) if message.contains("line 1")));
+    }
+
+    #[test]
+    fn canonical_v3_json_and_jsonl_roundtrip_with_explicit_schema_boundary() {
+        let dir = tempdir().unwrap();
+        let mut dataset = dataset();
+        dataset.promote_to_canonical_v3().unwrap();
+
+        let json_path = dir.path().join("dataset.json");
+        write_dataset_json(&json_path, &dataset).unwrap();
+        let json = fs::read_to_string(&json_path).unwrap();
+        assert!(json.contains("\"timebase\""));
+        assert!(!json.contains("\"timebase_den\""));
+        assert!(!json.contains("\"seconds\""));
+        assert_eq!(read_dataset_json(&json_path).unwrap(), dataset);
+
+        let manifest = write_dataset_dir(dir.path().join("records"), &dataset).unwrap();
+        assert_eq!(manifest.schema_version, 3);
+        let jsonl = fs::read_to_string(dir.path().join("records/records.jsonl")).unwrap();
+        assert!(jsonl.contains("\"timebase\""));
+        assert!(!jsonl.contains("\"timebase_den\""));
+        assert_eq!(read_dataset_dir(dir.path().join("records")).unwrap().records, dataset.records);
+    }
+
+    #[test]
+    fn stored_v2_dataset_keeps_original_timestamp_fields() {
+        let dir = tempdir().unwrap();
+        let dataset = dataset();
+        let path = dir.path().join("legacy.json");
+        write_dataset_json(&path, &dataset).unwrap();
+        let json = fs::read_to_string(&path).unwrap();
+        assert!(json.contains("\"timebase_den\""));
+        assert!(json.contains("\"seconds\""));
+        assert_eq!(read_dataset_json(&path).unwrap(), dataset);
     }
 
     #[test]
