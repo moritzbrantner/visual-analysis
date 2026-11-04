@@ -929,7 +929,7 @@ mod tests {
         assert_eq!(wire["metadata"]["schema_version"], 3);
         assert_eq!(
             wire["records"][0]["observation"]["timestamp"],
-            serde_json::to_value(timestamp).unwrap()
+            serde_json::json!({"pts": i64::MAX.to_string(), "timebase": {"num": 1, "den": 90_000}})
         );
         assert!(wire["records"][0]["observation"]["timestamp"]
             .get("seconds")
