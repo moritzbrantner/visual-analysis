@@ -343,6 +343,7 @@ impl FfmpegSourceOptions {
         self
     }
 
+
     /// Returns runtime.
     pub fn runtime(mut self, runtime: FfmpegRuntimeOptions) -> Self {
         self.runtime = runtime;
@@ -426,6 +427,14 @@ pub struct FfmpegVideoSource {
     process: DecoderProcess,
     next_frame_index: u64,
     frame_size: usize,
+    exact_frame_times: Option<ExactFrameTimes>,
+}
+
+/// Source PTS and an exclusive last-frame end, both measured in FFprobe's
+/// original stream timebase. Exact mode requires frame-count parity at EOF.
+struct ExactFrameTimes {
+    positions: Vec<FramePosition>,
+    end_exclusive: FramePosition,
 }
 
 impl FfmpegVideoSource {
@@ -439,11 +448,29 @@ impl FfmpegVideoSource {
         path: impl AsRef<Path>,
         options: FfmpegSourceOptions,
     ) -> Result<Self> {
+        Self::open_path_with_pts_mode(path, options, false)
+    }
+
+    /// Opt-in source preserving original integer FFprobe frame PTS and the
+    /// exclusive last-frame end. The existing options contract is unchanged.
+    /// Recorded local files only; arbitrary frame-changing args are rejected.
+    pub fn open_path_with_exact_frame_pts(
+        path: impl AsRef<Path>,
+        options: FfmpegSourceOptions,
+    ) -> Result<Self> {
+        Self::open_path_with_pts_mode(path, options, true)
+    }
+
+    fn open_path_with_pts_mode(
+        path: impl AsRef<Path>,
+        options: FfmpegSourceOptions,
+        preserve_pts: bool,
+    ) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         let input = path.to_string_lossy().into_owned();
         let metadata = probe_path_with_runtime(&path, options.mode, &options.runtime)
             .map_err(|err| DetectError::Source(err.to_string()))?;
-        Self::spawn(input, metadata, options)
+        Self::spawn(input, metadata, options, preserve_pts)
     }
 
     /// Returns open input.
@@ -464,11 +491,36 @@ impl FfmpegVideoSource {
         let input = input.into();
         let metadata = probe_input_with_runtime(&input, None, options.mode, &options.runtime)
             .map_err(|err| DetectError::Source(err.to_string()))?;
-        Self::spawn(input, metadata, options)
+        Self::spawn(input, metadata, options, false)
     }
 
-    fn spawn(input: String, metadata: VideoMetadata, options: FfmpegSourceOptions) -> Result<Self> {
+    fn spawn(
+        input: String,
+        metadata: VideoMetadata,
+        options: FfmpegSourceOptions,
+        preserve_pts: bool,
+    ) -> Result<Self> {
         reject_native_runtime(&options.runtime)?;
+        let exact_frame_times = if preserve_pts {
+            if options.mode != SourceMode::Recorded
+                || options.realtime
+                || !options.extra_input_args.is_empty()
+                || !options.extra_output_args.is_empty()
+            {
+                return Err(DetectError::InvalidArgument(
+                    "exact frame PTS requires a recorded file and unchanged frame selection"
+                        .into(),
+                ));
+            }
+            let path = metadata.path.as_deref().ok_or_else(|| {
+                DetectError::InvalidArgument(
+                    "exact frame PTS requires a local file path, not an input URL".into(),
+                )
+            })?;
+            Some(probe_exact_frame_times(path).map_err(into_detect_error)?)
+        } else {
+            None
+        };
         if metadata.width == 0 || metadata.height == 0 || options.resize_width == Some(0) {
             return Err(DetectError::InvalidArgument(
                 "video dimensions must be non-zero".into(),
@@ -565,6 +617,7 @@ impl FfmpegVideoSource {
             process,
             next_frame_index: 0,
             frame_size,
+            exact_frame_times,
         })
     }
 
@@ -583,7 +636,16 @@ impl FfmpegVideoSource {
         let mut offset = 0;
         while offset < self.frame_size {
             match self.process.read(&mut data[offset..]) {
-                Ok(0) if offset == 0 => return Ok(None),
+                Ok(0) if offset == 0 => {
+                    if self.exact_frame_times.as_ref().is_some_and(|timings| {
+                        self.next_frame_index != timings.positions.len() as u64
+                    }) {
+                        return Err(DetectError::Source(
+                            "decoded frame count disagrees with exact FFprobe positions".into(),
+                        ));
+                    }
+                    return Ok(None);
+                }
                 Ok(0) => {
                     return Err(DetectError::Source(
                         "ffmpeg ended in the middle of a raw frame".to_string(),
@@ -594,8 +656,18 @@ impl FfmpegVideoSource {
                 Err(err) => return Err(DetectError::Io(err)),
             }
         }
-        let position =
-            FramePosition::from_frame_index(self.next_frame_index, self.metadata.frame_rate);
+        let position = if let Some(timings) = &self.exact_frame_times {
+            *timings
+                .positions
+                .get(self.next_frame_index as usize)
+                .ok_or_else(|| {
+                    DetectError::Source(
+                        "FFmpeg decoded more frames than the exact FFprobe record".into(),
+                    )
+                })?
+        } else {
+            FramePosition::from_frame_index(self.next_frame_index, self.metadata.frame_rate)
+        };
         self.next_frame_index += 1;
         Ok(Some(OwnedVideoFrame {
             position,
@@ -606,6 +678,104 @@ impl FfmpegVideoSource {
             stride: self.source_info.video.as_ref().unwrap().width as usize * 3,
         }))
     }
+}
+
+/// Collect *integer* presentation timestamps from the same selected video
+/// stream that `-map 0:v:0 -vsync 0` decodes. In exact mode we fail closed if
+/// FFprobe cannot supply a PTS, last-frame duration, or matching frame count.
+/// This mode intentionally does not apply to streams, seeks, or FPS filters.
+fn probe_exact_frame_times(path: &Path) -> std::result::Result<ExactFrameTimes, FfmpegError> {
+    let output = Command::new("ffprobe")
+        .arg("-v")
+        .arg("error")
+        .arg("-select_streams")
+        .arg("v:0")
+        .arg("-show_frames")
+        .arg("-show_entries")
+        .arg("stream=time_base:frame=pts,pkt_duration")
+        .arg("-of")
+        .arg("json")
+        .arg(path)
+        .output()
+        .map_err(|error| FfmpegError::ProbeFailed {
+            input: path.display().to_string(),
+            message: error.to_string(),
+        })?;
+    if !output.status.success() {
+        return Err(FfmpegError::ProbeFailed {
+            input: path.display().to_string(),
+            message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        });
+    }
+    parse_exact_frame_times(&output.stdout)
+}
+
+fn exact_pts(value: &serde_json::Value, field: &str) -> std::result::Result<i64, FfmpegError> {
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|value| value.parse::<i64>().ok()))
+        .ok_or_else(|| {
+            FfmpegError::InvalidMetadata(format!(
+                "exact FFprobe field {field} must be an integer PTS"
+            ))
+        })
+}
+
+fn parse_exact_frame_times(json: &[u8]) -> std::result::Result<ExactFrameTimes, FfmpegError> {
+    let value: serde_json::Value = serde_json::from_slice(json).map_err(|error| {
+        FfmpegError::InvalidMetadata(format!("invalid exact FFprobe JSON: {error}"))
+    })?;
+    let timebase = value["streams"][0]["time_base"]
+        .as_str()
+        .and_then(|fraction| fraction.split_once('/'))
+        .and_then(|(num, den)| Some((num.parse::<i32>().ok()?, den.parse::<i32>().ok()?)))
+        .ok_or_else(|| FfmpegError::InvalidMetadata("missing stream timebase".into()))?;
+    if timebase.0 <= 0 || timebase.1 <= 0 {
+        return Err(FfmpegError::InvalidMetadata(
+            "exact stream timebase must be positive".into(),
+        ));
+    }
+    // The exact Foundation version pinned by this repo uses `new` rather
+    // than the later checked constructor; validate before constructing.
+    let timebase = Timebase::new(timebase.0, timebase.1);
+    let frames = value["frames"]
+        .as_array()
+        .filter(|frames| !frames.is_empty())
+        .ok_or_else(|| FfmpegError::InvalidMetadata("missing exact video frames".into()))?;
+    let mut positions = Vec::with_capacity(frames.len());
+    for (index, frame) in frames.iter().enumerate() {
+        let pts = exact_pts(&frame["pts"], "frame.pts")?;
+        if pts < 0 || positions.last().is_some_and(|position: &FramePosition| {
+            position.timestamp.pts >= pts
+        }) {
+            return Err(FfmpegError::InvalidMetadata(
+                "exact video PTS must be non-negative and strictly increasing".into(),
+            ));
+        }
+        positions.push(FramePosition {
+            frame_index: index as u64,
+            timestamp: Timestamp::new(pts, timebase),
+        });
+    }
+    let last_frame = frames.last().unwrap();
+    let last_duration = exact_pts(&last_frame["pkt_duration"], "last frame pkt_duration")?;
+    if last_duration <= 0 {
+        return Err(FfmpegError::InvalidMetadata(
+            "last frame duration must be positive for an exact exclusive end".into(),
+        ));
+    }
+    let last = *positions.last().unwrap();
+    let end_pts = last.timestamp.pts.checked_add(last_duration).ok_or_else(|| {
+        FfmpegError::InvalidMetadata("last frame exclusive PTS overflows i64".into())
+    })?;
+    let end_exclusive = FramePosition {
+        frame_index: positions.len() as u64,
+        timestamp: Timestamp::new(end_pts, timebase),
+    };
+    Ok(ExactFrameTimes {
+        positions,
+        end_exclusive,
+    })
 }
 
 fn ffmpeg_pixel_format(pixel_format: PixelFormat) -> &'static str {
@@ -644,6 +814,10 @@ impl VideoFrameSource for FfmpegVideoSource {
 
     fn next_video_frame(&mut self) -> Result<Option<OwnedVideoFrame>> {
         self.read_next_frame()
+    }
+
+    fn end_exclusive_position(&self) -> Option<FramePosition> {
+        self.exact_frame_times.as_ref().map(|times| times.end_exclusive)
     }
 }
 
@@ -1724,6 +1898,87 @@ mod tests {
         assert_eq!(scaled_even_height(720, 1280, 320).unwrap(), 568);
         assert_eq!(scaled_even_height(1920, 1080, 320).unwrap(), 180);
         assert_eq!(scaled_even_height(9, 16, 4).unwrap(), 6);
+    }
+
+    #[test]
+    fn exact_ffprobe_positions_retain_irregular_pts_and_last_duration() {
+        let json = br#"{
+            "frames": [
+                {"pts": 9000, "pkt_duration": 9000},
+                {"pts": "18000", "pkt_duration": 9000},
+                {"pts": 36000, "pkt_duration": 9000}
+            ],
+            "streams": [{"time_base": "1/90000"}]
+        }"#;
+        let times = parse_exact_frame_times(json).unwrap();
+        assert_eq!(times.positions.len(), 3);
+        assert_eq!(times.positions[1].timestamp.pts, 18_000);
+        assert_eq!(
+            times.positions[1].timestamp.timebase,
+            Timebase::new(1, 90_000)
+        );
+        assert_eq!(times.end_exclusive.frame_index, 3);
+        assert_eq!(times.end_exclusive.timestamp.pts, 45_000);
+
+        for malformed in [
+            br#"{"frames":[{"pts":9000}],"streams":[{"time_base":"1/90000"}]}"#.as_slice(),
+            br#"{"frames":[{"pts":9000},{"pts":9000,"pkt_duration":20}],"streams":[{"time_base":"1/90000"}]}"#
+                .as_slice(),
+            br#"{"frames":[{"pts":9000,"pkt_duration":20}],"streams":[{"time_base":"0/90000"}]}"#
+                .as_slice(),
+        ] {
+            assert!(parse_exact_frame_times(malformed).is_err());
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "ffmpeg-tests")]
+    fn exact_ffprobe_vfr_decode_matches_source_pts_and_exclusive_end() {
+        use video_analysis_core::VideoSource;
+
+        if !(is_ffmpeg_available() && is_ffprobe_available()) {
+            eprintln!("skipping FFmpeg VFR test because ffmpeg/ffprobe is unavailable");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("irregular-vfr.mkv");
+        let status = Command::new("ffmpeg")
+            .args(["-y", "-v", "error", "-f", "lavfi", "-i"])
+            .arg("testsrc=size=64x64:rate=10:duration=1")
+            .args(["-vf", "select=not(eq(mod(n\\,3)\\,0))", "-vsync", "vfr"])
+            .args(["-c:v", "ffv1"])
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(status.success(), "cannot create VFR test media");
+
+        let mut source = FfmpegVideoSource::open_path_with_exact_frame_pts(
+            &path,
+            FfmpegSourceOptions::recorded(),
+        )
+        .unwrap();
+        let mut pts = Vec::new();
+        while let Some(frame) = source.next_frame().unwrap() {
+            pts.push(frame.position.timestamp.pts);
+            assert_eq!(frame.position.timestamp.timebase, Timebase::new(1, 1000));
+        }
+        assert_eq!(pts, [100, 200, 400, 500, 700, 800]);
+        let end = source.end_exclusive_position().unwrap();
+        assert_eq!((end.frame_index, end.timestamp.pts), (6, 900));
+
+        let mut scenes_source = FfmpegVideoSource::open_path_with_exact_frame_pts(
+            &path,
+            FfmpegSourceOptions::recorded(),
+        )
+        .unwrap();
+        let result = video_analysis_ingest::surface::detect_content_scenes(
+            &mut scenes_source,
+            27.0,
+            1,
+        )
+        .unwrap();
+        assert_eq!(result.frames_processed, 6);
+        assert_eq!(result.scenes.last().unwrap().end, end);
     }
 
     #[test]

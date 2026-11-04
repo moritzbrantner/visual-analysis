@@ -31,6 +31,23 @@ audio, its zero-based audio ordinal. Explicit audio selection is validated
 against that inventory before FFmpeg decode starts. Omitting the selector keeps
 the existing first-audio-stream behavior.
 
+### Exact timestamps for recorded VFR media
+
+For local recorded video, use
+`FfmpegVideoSource::open_path_with_exact_frame_pts(path, FfmpegSourceOptions::recorded())`.
+This opt-in mode probes the selected FFprobe video stream's **integer frame PTS,
+original timebase, and last-frame packet duration**. Decoded frames carry
+those positions, and `detect_content_scenes` uses their exclusive final end
+rather than adding one PTS tick. Existing callers keep the fast frame-index/FPS
+timing behavior and require no schema or dependency migration.
+
+The exact mode performs a separate FFprobe frame scan before decoding, so it
+costs extra CPU and memory. It fails when exact PTS, final packet duration, or
+decoded frame-count parity is unavailable; it does not reconstruct PTS from
+floating seconds. Live inputs, input URLs, and custom frame-changing FFmpeg
+arguments are not supported in this mode. It reports **stream PTS**, which can
+require an explicit exact offset mapping before consumers call it media-relative.
+
 ## Related crates
 
 - `video-analysis-ingest`
