@@ -271,21 +271,78 @@ pub fn join_by_time(
     right: &[DatasetRecord],
     options: TemporalJoinOptions,
 ) -> Vec<JoinedRecordPair> {
+    let mut work = TemporalJoinWork::default();
+    join_by_time_indexed(left, right, options, &mut work)
+}
+
+#[derive(Default)]
+struct TemporalJoinWork {
+    exact_checks: usize,
+}
+
+// The right side is time-indexed once, while qualifying pairs are emitted in
+// the original left-major/right-major order for API compatibility.
+fn join_by_time_indexed(
+    left: &[DatasetRecord],
+    right: &[DatasetRecord],
+    options: TemporalJoinOptions,
+    work: &mut TemporalJoinWork,
+) -> Vec<JoinedRecordPair> {
     if options.tolerance_seconds < 0.0 || !options.tolerance_seconds.is_finite() {
         return Vec::new();
     }
 
+    // Finite tolerance can never match a NaN/inf endpoint; keep their legacy
+    // behavior without making total_cmp's nonfinite ordering a query boundary.
+    let mut right_by_time: Vec<(f64, usize)> = right
+        .iter()
+        .enumerate()
+        .filter_map(|(index, record)| {
+            record_timestamp_seconds(record)
+                .filter(|time| time.is_finite())
+                .map(|time| (time, index))
+        })
+        .collect();
+    let right_in_input_order = right_by_time
+        .iter()
+        .map(|(_, index)| *index)
+        .collect::<Vec<_>>();
+    right_by_time.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+
     let mut joined = Vec::new();
     for (left_index, left_record) in left.iter().enumerate() {
-        let Some(left_time) = record_timestamp_seconds(left_record) else {
+        let Some(left_time) = record_timestamp_seconds(left_record).filter(|time| time.is_finite())
+        else {
             continue;
         };
-        for (right_index, right_record) in right.iter().enumerate() {
+        let tolerance = options.tolerance_seconds;
+        // Widen the search envelope by two ULPs: the final delta comparison
+        // remains the original authority, including rounding at boundaries.
+        let lower = (left_time - tolerance).next_down().next_down();
+        let upper = (left_time + tolerance).next_up().next_up();
+        let first = right_by_time.partition_point(|(time, _)| *time < lower);
+        let last = right_by_time.partition_point(|(time, _)| *time <= upper);
+
+        // Dense matches are output-sized anyway. Scanning in input order
+        // avoids an O(K log K) resort of nearly all right-hand records.
+        let candidates = if last - first > right_by_time.len() / 2 {
+            right_in_input_order.clone()
+        } else {
+            let mut matches = right_by_time[first..last]
+                .iter()
+                .map(|(_, index)| *index)
+                .collect::<Vec<_>>();
+            matches.sort_unstable();
+            matches
+        };
+        for right_index in candidates {
+            let right_record = &right[right_index];
             let Some(right_time) = record_timestamp_seconds(right_record) else {
                 continue;
             };
+            work.exact_checks += 1;
             let delta = right_time - left_time;
-            if delta.abs() <= options.tolerance_seconds {
+            if delta.abs() <= tolerance {
                 joined.push(JoinedRecordPair {
                     left_index,
                     right_index,
@@ -617,6 +674,131 @@ mod tests {
             .len(),
             1
         );
+    }
+
+    fn timed_feature(index: usize, seconds: f64) -> DatasetRecord {
+        let mut feature = FeatureRecord::number("value", index as f64);
+        feature.timestamp = Some(TimestampRecord {
+            pts: index as i64,
+            timebase_num: 1,
+            timebase_den: 1,
+            seconds,
+        });
+        DatasetRecord::Feature(feature)
+    }
+
+    fn quadratic_join(
+        left: &[DatasetRecord],
+        right: &[DatasetRecord],
+        tolerance: f64,
+    ) -> Vec<JoinedRecordPair> {
+        let mut joined = Vec::new();
+        for (left_index, left_record) in left.iter().enumerate() {
+            let Some(left_time) = record_timestamp_seconds(left_record) else {
+                continue;
+            };
+            for (right_index, right_record) in right.iter().enumerate() {
+                let Some(right_time) = record_timestamp_seconds(right_record) else {
+                    continue;
+                };
+                let delta = right_time - left_time;
+                if delta.abs() <= tolerance {
+                    joined.push(JoinedRecordPair {
+                        left_index,
+                        right_index,
+                        delta,
+                        left: left_record.clone(),
+                        right: right_record.clone(),
+                    });
+                }
+            }
+        }
+        joined
+    }
+
+    #[test]
+    fn indexed_temporal_join_matches_quadratic_oracle_at_float_boundaries() {
+        let times = [
+            2.0,
+            0.0,
+            -0.0,
+            0.1,
+            0.3,
+            1.0,
+            1.0_f64.next_up(),
+            1.0e308,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+        ];
+        let left = times
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(i, t)| timed_feature(i, t))
+            .collect::<Vec<_>>();
+        let right = times
+            .iter()
+            .copied()
+            .rev()
+            .enumerate()
+            .map(|(i, t)| timed_feature(i, t))
+            .collect::<Vec<_>>();
+        for tolerance in [0.0, 0.1, 0.2, 1.0, f64::MAX] {
+            assert_eq!(
+                join_by_time(
+                    &left,
+                    &right,
+                    TemporalJoinOptions {
+                        tolerance_seconds: tolerance
+                    }
+                ),
+                quadratic_join(&left, &right, tolerance),
+                "tolerance {tolerance}"
+            );
+        }
+    }
+
+    #[test]
+    fn indexed_temporal_join_prunes_sparse_candidate_checks() {
+        let left = (0..1_000)
+            .map(|i| timed_feature(i, i as f64 * 10.0))
+            .collect::<Vec<_>>();
+        let right = (0..1_000)
+            .map(|i| timed_feature(i, i as f64 * 10.0 + 5.0))
+            .collect::<Vec<_>>();
+        let mut work = TemporalJoinWork::default();
+        let joined = join_by_time_indexed(
+            &left,
+            &right,
+            TemporalJoinOptions { tolerance_seconds: 0.1 },
+            &mut work,
+        );
+        assert!(joined.is_empty());
+        assert!(
+            work.exact_checks < 1_000,
+            "{} exact checks versus 1,000,000 quadratic pairs",
+            work.exact_checks
+        );
+    }
+
+    #[test]
+    fn indexed_temporal_join_remains_output_ordered_for_dense_matches() {
+        let left = (0..100)
+            .map(|i| timed_feature(i, 0.0))
+            .collect::<Vec<_>>();
+        let right = (0..100)
+            .map(|i| timed_feature(i, 0.0))
+            .collect::<Vec<_>>();
+        let mut work = TemporalJoinWork::default();
+        let joined = join_by_time_indexed(
+            &left,
+            &right,
+            TemporalJoinOptions { tolerance_seconds: 0.0 },
+            &mut work,
+        );
+        assert_eq!(joined, quadratic_join(&left, &right, 0.0));
+        assert_eq!(work.exact_checks, 10_000);
     }
 
     #[test]
