@@ -877,7 +877,12 @@ impl Observation {
         let text = self.text.as_ref()?;
         let mut segment = OwnedTextSegment::new(segment_index, text.clone());
         if let Some(timestamp) = self.timestamp {
-            segment = segment.timestamp(timestamp);
+            // text-core 0.1.x still re-exports media-core 0.1's Timestamp.
+            // Preserve the exact PTS and timebase at this compatibility edge.
+            segment = segment.timestamp(text_core::Timestamp::new(
+                timestamp.pts,
+                text_core::Timebase::new(timestamp.timebase.num, timestamp.timebase.den),
+            ));
         }
         if let Some(language) = self.attributes.get("language") {
             segment = segment.language(language.clone());
@@ -1916,6 +1921,15 @@ mod tests {
             analysis.observations[0].to_text_segment(0).unwrap().text,
             "EXIT"
         );
+        let source_timestamp = analysis.observations[0].timestamp.unwrap();
+        let text_timestamp = analysis.observations[0]
+            .to_text_segment(0)
+            .unwrap()
+            .timestamp
+            .unwrap();
+        assert_eq!(text_timestamp.pts, source_timestamp.pts);
+        assert_eq!(text_timestamp.timebase.num, source_timestamp.timebase.num);
+        assert_eq!(text_timestamp.timebase.den, source_timestamp.timebase.den);
         assert_eq!(pipeline.finish_analysis().unwrap().observations.len(), 1);
     }
 

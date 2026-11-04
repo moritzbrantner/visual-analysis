@@ -445,7 +445,15 @@ impl<B: TextModelBackend> ModelTextAnalyzer<B> {
             .map(|prediction| {
                 let mut event = prediction.to_event(&self.name);
                 if let Some(timestamp) = segment.timestamp {
-                    event = event.at_timestamp(timestamp);
+                    // text-core 0.1.x still uses media-core 0.1 timestamps.
+                    // Keep exact PTS and timebase for 0.2 analysis events.
+                    event = event.at_timestamp(video_analysis_core::Timestamp::new(
+                        timestamp.pts,
+                        video_analysis_core::Timebase::new(
+                            timestamp.timebase.num,
+                            timestamp.timebase.den,
+                        ),
+                    ));
                 }
                 event
             })
