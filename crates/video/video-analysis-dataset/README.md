@@ -2,6 +2,22 @@
 
 Serializable retained analysis records for `moritzbrantner-video-analysis`.
 
+## Versioned timestamp interoperability
+
+Dataset schema **v2** remains the default and keeps its existing flattened
+`{pts, timebase_num, timebase_den, seconds}` timestamp records unchanged.
+For interoperability with other Foundation consumers, explicitly call
+`dataset.promote_to_canonical_v3()` before persisting. Schema **v3** then uses
+the canonical `moenarch-media-core::Timestamp` JSON representation
+`{pts, timebase: {num, den}}`; the `pts` wire and positive rational validation
+come from Foundation, and derived `seconds` is never stored in v3.
+
+Serialization and deserialization of `AnalysisDataset` are version-aware;
+`video-analysis-storage` also writes/reads schema v3 timestamps in JSONL
+using the dataset manifest version. Existing v2 JSON and JSONL remain readable.
+Migration checks for conflicting legacy `seconds` values and rejects invalid
+timebases rather than silently rounding or changing timestamp identity.
+
 ## Feature flags
 
 - No optional feature flags today.
