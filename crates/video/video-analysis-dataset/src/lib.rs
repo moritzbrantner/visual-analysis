@@ -818,12 +818,15 @@ mod tests {
         assert_eq!(timestamp_record.seconds, 1.5);
 
         let observation = Observation::new("ocr", ObservationKind::Text)
-            .at_timestamp(Timestamp::new(9_009, Timebase::new(1, 90_000)))
+            .at_timestamp(Timestamp::new(
+                9_007_199_254_740_993,
+                Timebase::new(1, 90_000),
+            ))
             .text("caption");
         let owned_segment = observation.to_text_segment(0).unwrap();
         let record = TextSegmentRecord::from_segment("stream", &owned_segment.as_segment());
         let recorded_timestamp = record.timestamp.unwrap();
-        assert_eq!(recorded_timestamp.pts, 9_009);
+        assert_eq!(recorded_timestamp.pts, 9_007_199_254_740_993);
         assert_eq!(recorded_timestamp.timebase_num, 1);
         assert_eq!(recorded_timestamp.timebase_den, 90_000);
 

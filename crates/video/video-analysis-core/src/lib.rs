@@ -1934,6 +1934,21 @@ mod tests {
     }
 
     #[test]
+    fn text_segment_preserves_pts_beyond_f64_integer_precision() {
+        // A seconds-based roundtrip cannot retain every PTS above 2^53.
+        let source_timestamp = Timestamp::new(9_007_199_254_740_993, Timebase::new(1, 90_000));
+        let observation = Observation::new("ocr", ObservationKind::Text)
+            .at_timestamp(source_timestamp)
+            .text("subtitle");
+        let segment = observation.to_text_segment(7).unwrap();
+        let timestamp = segment.timestamp.unwrap();
+
+        assert_eq!(timestamp.pts, source_timestamp.pts);
+        assert_eq!(timestamp.timebase.num, 1);
+        assert_eq!(timestamp.timebase.den, 90_000);
+    }
+
+    #[test]
     fn sampled_video_analyzer_skips_unsampled_frames() {
         struct CountingVideoAnalyzer {
             frames: Vec<u64>,

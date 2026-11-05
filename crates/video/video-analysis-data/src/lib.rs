@@ -934,7 +934,7 @@ mod tests {
 
     #[test]
     fn text_record_preserves_exact_timestamp_across_media_versions() {
-        let source_timestamp = Timestamp::new(9_009, Timebase::new(1, 90_000));
+        let source_timestamp = Timestamp::new(9_007_199_254_740_993, Timebase::new(1, 90_000));
         let segment = video_analysis_core::Observation::new(
             "ocr",
             video_analysis_core::ObservationKind::Text,
