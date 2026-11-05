@@ -2,7 +2,7 @@
 
 `visual-analysis` keeps registry coordinates as its distribution contract. Ordinary cross-repository source development is intentionally limited to the lower-level `moenarch-foundation` graph.
 
-The committed `.coding-tooling.source-deps.json` pins the foundation package closure used by this workspace to one exact `moenarch-foundation` revision and enables local-only resolution.
+The committed `.coding-tooling.source-deps.json` pins the compatible foundation source overrides to one exact `moenarch-foundation` revision and enables local-only resolution. `moenarch-runtime-onnx` remains on the published `=0.1.1` registry contract: the pinned Foundation source contains unreleased `0.1.2`, which cannot satisfy that requirement. Do not add the incompatible path patch until a separately approved runtime release and consumer migration.
 
 ## Fresh-clone bootstrap (default path)
 

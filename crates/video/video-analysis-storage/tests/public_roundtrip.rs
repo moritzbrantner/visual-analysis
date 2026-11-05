@@ -1,5 +1,5 @@
 use video_analysis_core::{
-    AnalysisEvent, Observation, ObservationKind, TextSegment, Timebase, Timestamp,
+    AnalysisEvent, Observation, ObservationKind, OwnedTextSegment, Timebase, Timestamp,
 };
 use video_analysis_core::{FramePosition, Scene};
 use video_analysis_dataset::{
@@ -28,14 +28,13 @@ fn scene(start: u64, end: u64) -> Scene {
     }
 }
 
-fn text_segment(index: u64, text: &str) -> TextSegment<'_> {
-    TextSegment {
-        segment_index: index,
-        timestamp: Some(timestamp(index as i64)),
-        text,
-        language: Some("en"),
-        is_final: true,
-    }
+fn text_segment(index: u64, text: &str) -> OwnedTextSegment {
+    Observation::new("fixture", ObservationKind::Text)
+        .at_timestamp(timestamp(index as i64))
+        .attribute("language", "en")
+        .text(text)
+        .to_text_segment(index)
+        .unwrap()
 }
 
 fn dataset_with_scene_text_and_feature() -> AnalysisDataset {
@@ -45,13 +44,13 @@ fn dataset_with_scene_text_and_feature() -> AnalysisDataset {
     dataset.push(DatasetRecord::Scene(SceneRecord::from_scene(0, &scene)));
     dataset.push(DatasetRecord::TextSegment(TextSegmentRecord::from_segment(
         "transcript",
-        &text,
+        &text.as_segment(),
     )));
     dataset.extend_observations([Observation::new("fixture", ObservationKind::Text)
         .at_timestamp(timestamp(0))
         .in_scene(0)
         .label("fixture")
-        .text(text.text)]);
+        .text(text.text.as_str())]);
     dataset
         .extend_events([AnalysisEvent::new("fixture", "text:fixture").at_timestamp(timestamp(0))]);
     dataset.push(DatasetRecord::Feature(
