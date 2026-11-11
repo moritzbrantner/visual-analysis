@@ -8,7 +8,7 @@ use std::path::Path;
 use num_rational::Rational64;
 use video_analysis_core::{
     AudioAnalysis, AudioAnalysisResult, AudioPipeline, AudioSampleFormat, DetectionResult,
-    FrameAnalysis, OwnedAudioFrame, OwnedTextSegment, OwnedVideoFrame, PixelFormat,
+    FrameAnalysis, FramePosition, OwnedAudioFrame, OwnedTextSegment, OwnedVideoFrame, PixelFormat,
     RealtimeVideoAnalysisResult, RealtimeVideoFrameAnalysis, RealtimeVideoPipeline, Result,
     ScenePipeline, VideoAnalysisPipeline, VideoAnalysisResult, VideoFrameAnalysis,
 };
@@ -160,6 +160,12 @@ pub trait VideoFrameSource {
     fn source_info(&self) -> &MediaSourceInfo;
     /// Returns next video frame.
     fn next_video_frame(&mut self) -> Result<Option<OwnedVideoFrame>>;
+
+    /// The exclusive end after the last source frame, when known exactly.
+    /// Sources without a trustworthy end retain the legacy FPS-based fallback.
+    fn end_exclusive_position(&self) -> Option<FramePosition> {
+        None
+    }
 
     /// Returns frame rate.
     fn frame_rate(&self) -> Option<Rational64> {

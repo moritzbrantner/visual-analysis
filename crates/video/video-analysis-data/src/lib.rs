@@ -234,7 +234,17 @@ impl<'a> DataRecord<'a> {
         Self {
             stream_id,
             sequence: segment.segment_index,
-            timestamp: segment.timestamp,
+            // text-core 0.1.x uses media-core 0.1 timestamp types.
+            // Preserve integer PTS/timebase when entering our 0.2 data model.
+            timestamp: segment.timestamp.map(|timestamp| {
+                Timestamp::new(
+                    timestamp.pts,
+                    video_analysis_core::Timebase::new(
+                        timestamp.timebase.num,
+                        timestamp.timebase.den,
+                    ),
+                )
+            }),
             payload: DataPayload::Text { text: segment.text },
         }
     }
@@ -897,7 +907,7 @@ mod tests {
         let frame = VideoFrame::packed(position, 2, 2, PixelFormat::Rgb24, &pixels, 6).unwrap();
         let audio_buffer = AudioBuffer::F32(vec![0.0, 1.0, 0.5, -0.5]);
         let audio = AudioFrame::new(ts(5), 48_000, 2, &audio_buffer).unwrap();
-        let text = OwnedTextSegment::new(7, "hello large world").timestamp(ts(6));
+        let text = OwnedTextSegment::new(7, "hello large world");
 
         let mut aggregator = BucketAggregator::new(BucketConfig::record_count(3).unwrap()).unwrap();
         assert!(aggregator
@@ -920,6 +930,21 @@ mod tests {
             bucket.estimated_bytes,
             12 + 16 + "hello large world".len() as u64
         );
+    }
+
+    #[test]
+    fn text_record_preserves_exact_timestamp_across_media_versions() {
+        let source_timestamp = Timestamp::new(9_007_199_254_740_993, Timebase::new(1, 90_000));
+        let segment = video_analysis_core::Observation::new(
+            "ocr",
+            video_analysis_core::ObservationKind::Text,
+        )
+        .at_timestamp(source_timestamp)
+        .text("subtitle")
+        .to_text_segment(7)
+        .unwrap();
+        let record = DataRecord::text_segment("text", &segment.as_segment());
+        assert_eq!(record.timestamp, Some(source_timestamp));
     }
 
     #[test]

@@ -877,7 +877,12 @@ impl Observation {
         let text = self.text.as_ref()?;
         let mut segment = OwnedTextSegment::new(segment_index, text.clone());
         if let Some(timestamp) = self.timestamp {
-            segment = segment.timestamp(timestamp);
+            // text-core 0.1.x still re-exports media-core 0.1's Timestamp.
+            // Preserve the exact PTS and timebase at this compatibility edge.
+            segment = segment.timestamp(text_core::Timestamp::new(
+                timestamp.pts,
+                text_core::Timebase::new(timestamp.timebase.num, timestamp.timebase.den),
+            ));
         }
         if let Some(language) = self.attributes.get("language") {
             segment = segment.language(language.clone());
@@ -1635,6 +1640,25 @@ pub fn scenes_from_cuts(
     last_frame: FramePosition,
     start_in_scene: bool,
 ) -> Vec<Scene> {
+    scenes_from_cuts_with_end(
+        cuts,
+        start,
+        FramePosition {
+            frame_index: last_frame.frame_index + 1,
+            timestamp: Timestamp::new(last_frame.timestamp.pts + 1, last_frame.timestamp.timebase),
+        },
+        start_in_scene,
+    )
+}
+
+/// Assembles half-open scenes with a caller-supplied *exact* exclusive end.
+/// Variable-frame-rate media must not assume a final frame lasts one PTS tick.
+pub fn scenes_from_cuts_with_end(
+    cuts: &[Cut],
+    start: FramePosition,
+    end_exclusive: FramePosition,
+    start_in_scene: bool,
+) -> Vec<Scene> {
     if cuts.is_empty() && !start_in_scene {
         return Vec::new();
     }
@@ -1652,10 +1676,7 @@ pub fn scenes_from_cuts(
     }
     scenes.push(Scene {
         start: scene_start,
-        end: FramePosition {
-            frame_index: last_frame.frame_index + 1,
-            timestamp: Timestamp::new(last_frame.timestamp.pts + 1, last_frame.timestamp.timebase),
-        },
+        end: end_exclusive,
     });
     scenes
 }
@@ -1754,6 +1775,36 @@ mod tests {
         assert_eq!(scenes[0].end.frame_index, 5);
         assert_eq!(scenes[1].start.frame_index, 5);
         assert_eq!(scenes[1].end.frame_index, 10);
+    }
+
+    #[test]
+    fn exact_scene_end_uses_last_frame_duration_not_one_pts_tick() {
+        let first = FramePosition {
+            frame_index: 0,
+            timestamp: Timestamp::new(9_000, Timebase::new(1, 90_000)),
+        };
+        let cut = FramePosition {
+            frame_index: 4,
+            timestamp: Timestamp::new(18_000, Timebase::new(1, 90_000)),
+        };
+        let end = FramePosition {
+            frame_index: 7,
+            timestamp: Timestamp::new(45_000, Timebase::new(1, 90_000)),
+        };
+        let scenes = scenes_from_cuts_with_end(
+            &[Cut {
+                position: cut,
+                detector: "content",
+                score: None,
+            }],
+            first,
+            end,
+            true,
+        );
+        assert_eq!(scenes.len(), 2);
+        assert_eq!(scenes[0].end, cut);
+        assert_eq!(scenes[1].start, cut);
+        assert_eq!(scenes[1].end, end);
     }
 
     #[test]
@@ -1916,7 +1967,31 @@ mod tests {
             analysis.observations[0].to_text_segment(0).unwrap().text,
             "EXIT"
         );
+        let source_timestamp = analysis.observations[0].timestamp.unwrap();
+        let text_timestamp = analysis.observations[0]
+            .to_text_segment(0)
+            .unwrap()
+            .timestamp
+            .unwrap();
+        assert_eq!(text_timestamp.pts, source_timestamp.pts);
+        assert_eq!(text_timestamp.timebase.num, source_timestamp.timebase.num);
+        assert_eq!(text_timestamp.timebase.den, source_timestamp.timebase.den);
         assert_eq!(pipeline.finish_analysis().unwrap().observations.len(), 1);
+    }
+
+    #[test]
+    fn text_segment_preserves_pts_beyond_f64_integer_precision() {
+        // A seconds-based roundtrip cannot retain every PTS above 2^53.
+        let source_timestamp = Timestamp::new(9_007_199_254_740_993, Timebase::new(1, 90_000));
+        let observation = Observation::new("ocr", ObservationKind::Text)
+            .at_timestamp(source_timestamp)
+            .text("subtitle");
+        let segment = observation.to_text_segment(7).unwrap();
+        let timestamp = segment.timestamp.unwrap();
+
+        assert_eq!(timestamp.pts, source_timestamp.pts);
+        assert_eq!(timestamp.timebase.num, 1);
+        assert_eq!(timestamp.timebase.den, 90_000);
     }
 
     #[test]

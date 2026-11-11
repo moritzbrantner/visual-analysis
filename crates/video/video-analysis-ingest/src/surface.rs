@@ -10,8 +10,8 @@ use runtime_core::{
     SurfaceRequest, SurfaceResponse,
 };
 use video_analysis_core::{
-    scenes_from_cuts, Cut, DetectError, DetectionResult, FramePosition, MetricsSink, MetricsStore,
-    OwnedVideoFrame, VideoSource,
+    scenes_from_cuts, scenes_from_cuts_with_end, Cut, DetectError, DetectionResult, FramePosition,
+    MetricsSink, MetricsStore, OwnedVideoFrame, VideoSource,
 };
 use video_analysis_detectors::{
     analyze_content_source, BoundaryReviewOptions, ContentDetectorConfig, DetectionOptions,
@@ -149,8 +149,22 @@ where
             metrics.set_metric(positions[row.frame.0 as usize].frame_index, &key, value);
         }
     }
+    let last = *positions.last().unwrap();
+    let scenes = if let Some(end) = source.end_exclusive_position() {
+        if end.frame_index != last.frame_index + 1
+            || end.timestamp.timebase != last.timestamp.timebase
+            || end.timestamp.pts <= last.timestamp.pts
+        {
+            return Err(DetectError::InvalidArgument(
+                "exact source end must follow the last decoded frame".into(),
+            ));
+        }
+        scenes_from_cuts_with_end(&cuts, positions[0], end, true)
+    } else {
+        scenes_from_cuts(&cuts, positions[0], last, true)
+    };
     Ok(DetectionResult {
-        scenes: scenes_from_cuts(&cuts, positions[0], *positions.last().unwrap(), true),
+        scenes,
         cuts,
         metrics,
         frames_processed: positions.len() as u64,

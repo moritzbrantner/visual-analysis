@@ -445,11 +445,54 @@ impl<B: TextModelBackend> ModelTextAnalyzer<B> {
             .map(|prediction| {
                 let mut event = prediction.to_event(&self.name);
                 if let Some(timestamp) = segment.timestamp {
-                    event = event.at_timestamp(timestamp);
+                    // text-core 0.1.x still uses media-core 0.1 timestamps.
+                    // Keep exact PTS and timebase for 0.2 analysis events.
+                    event = event.at_timestamp(video_analysis_core::Timestamp::new(
+                        timestamp.pts,
+                        video_analysis_core::Timebase::new(
+                            timestamp.timebase.num,
+                            timestamp.timebase.den,
+                        ),
+                    ));
                 }
                 event
             })
             .collect())
+    }
+}
+
+#[cfg(test)]
+mod text_timestamp_tests {
+    use super::*;
+    use video_analysis_core::{ObservationKind, Timebase, Timestamp};
+
+    struct FixtureTextBackend;
+
+    impl TextModelBackend for FixtureTextBackend {
+        fn task(&self) -> ModelTask {
+            ModelTask::TextClassification
+        }
+
+        fn predict_text(&mut self, _segment: &TextSegment<'_>) -> Result<Vec<RawPrediction>> {
+            Ok(vec![RawPrediction::label("caption", 1.0)])
+        }
+    }
+
+    #[test]
+    fn model_text_events_preserve_pts_beyond_f64_integer_precision() -> Result<()> {
+        let timestamp = Timestamp::new(9_007_199_254_740_993, Timebase::new(1, 90_000));
+        let segment = video_analysis_core::Observation::new("ocr", ObservationKind::Text)
+            .at_timestamp(timestamp)
+            .text("subtitle")
+            .to_text_segment(7)
+            .unwrap();
+
+        let events = ModelTextAnalyzer::new("model", FixtureTextBackend)
+            .analyze_segment(&segment.as_segment())?;
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].timestamp, Some(timestamp));
+        Ok(())
     }
 }
 

@@ -534,7 +534,18 @@ impl TextSegmentRecord {
         Self {
             stream_id: stream_id.into(),
             segment_index: segment.segment_index,
-            timestamp: segment.timestamp.map(Into::into),
+            // text-core 0.1.x retains media-core 0.1 timestamps. Convert the
+            // exact integer coordinates into our media-core 0.2 representation.
+            timestamp: segment.timestamp.map(|timestamp| {
+                Timestamp::new(
+                    timestamp.pts,
+                    video_analysis_core::Timebase::new(
+                        timestamp.timebase.num,
+                        timestamp.timebase.den,
+                    ),
+                )
+                .into()
+            }),
             text: segment.text.to_string(),
             language: segment.language.map(str::to_string),
             is_final: segment.is_final,
@@ -895,6 +906,19 @@ mod tests {
         let timestamp_record = TimestampRecord::from(timestamp);
         assert_eq!(timestamp_record.pts, 3);
         assert_eq!(timestamp_record.seconds, 1.5);
+
+        let observation = Observation::new("ocr", ObservationKind::Text)
+            .at_timestamp(Timestamp::new(
+                9_007_199_254_740_993,
+                Timebase::new(1, 90_000),
+            ))
+            .text("caption");
+        let owned_segment = observation.to_text_segment(0).unwrap();
+        let record = TextSegmentRecord::from_segment("stream", &owned_segment.as_segment());
+        let recorded_timestamp = record.timestamp.unwrap();
+        assert_eq!(recorded_timestamp.pts, 9_007_199_254_740_993);
+        assert_eq!(recorded_timestamp.timebase_num, 1);
+        assert_eq!(recorded_timestamp.timebase_den, 90_000);
 
         let frame = FramePositionRecord::from(position(9));
         assert_eq!(frame.frame_index, 9);

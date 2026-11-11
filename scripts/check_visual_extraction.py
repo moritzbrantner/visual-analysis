@@ -16,21 +16,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_SHA = "b8b29cf8db0b86ed1b133a18155adf24992f9483"
 EXPECTED_EXTERNAL = {
-    "audio-contracts": ("moenarch-audio-contracts", "=0.1.0"),
-    "data-inversion-core": ("moenarch-data-inversion-core", "=0.1.1"),
-    "math-geometry-2d": ("moenarch-math-geometry-2d", "=0.1.1"),
-    "math-linear": ("moenarch-math-linear", "=0.1.1"),
-    "media-core": ("moenarch-media-core", "=0.1.0"),
+    "audio-contracts": ("moenarch-audio-contracts", "=0.2.0"),
+    "data-inversion-core": ("moenarch-data-inversion-core", "=0.2.0"),
+    "math-geometry-2d": ("moenarch-math-geometry-2d", "=0.2.0"),
+    "math-linear": ("moenarch-math-linear", "=0.2.0"),
+    "media-core": ("moenarch-media-core", "=0.2.0"),
     "model-runtime": ("moenarch-model-runtime", "=0.1.1"),
-    "numbers-core": ("moenarch-numbers-core", "=0.1.1"),
+    "numbers-core": ("moenarch-numbers-core", "=0.2.0"),
     "runtime-core": ("moenarch-runtime-core", "=0.2.1"),
     "runtime-onnx": ("moenarch-runtime-onnx", "=0.1.1"),
     "scenedetect-core": ("scenedetect-core", "=0.1.0"),
-    "tensor-data": ("moenarch-tensor-data", "=0.1.1"),
+    "tensor-data": ("moenarch-tensor-data", "=0.2.0"),
     "text-core": ("moenarch-text-core", "=0.1.1"),
 }
 REQUIRED_REGISTRY_PACKAGES = (
-    ("moenarch-audio-contracts", "0.1.0"),
+    ("moenarch-audio-contracts", "0.2.0"),
     ("scenedetect-core", "0.1.0"),
 )
 FORBIDDEN_DEPENDENCIES = {
