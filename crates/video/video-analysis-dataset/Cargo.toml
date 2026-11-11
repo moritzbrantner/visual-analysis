@@ -16,6 +16,7 @@ categories.workspace = true
 name = "video_analysis_dataset"
 
 [dependencies]
+media-core.workspace = true
 runtime-core.workspace = true
 serde_json.workspace = true
 serde.workspace = true

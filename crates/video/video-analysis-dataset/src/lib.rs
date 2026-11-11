@@ -1,10 +1,11 @@
 #![doc = include_str!("../README.md")]
 
 pub mod surface;
+mod canonical_wire;
 use std::collections::BTreeMap;
 use std::mem;
 
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as _, ser::Error as _, Deserialize, Serialize};
 use video_analysis_core::{
     AnalysisEvent, AudioBuffer, AudioFrame, AudioSampleFormat, BoundingBox, Cut, DetectionResult,
     FramePosition, MetricsStore, Observation, ObservationKind, PixelFormat, Scene, TextSegment,
@@ -41,7 +42,7 @@ impl Default for DatasetMetadata {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 /// Data type for analysis dataset.
 pub struct AnalysisDataset {
     /// Metadata associated with this value.
@@ -50,7 +51,82 @@ pub struct AnalysisDataset {
     pub records: Vec<DatasetRecord>,
 }
 
+// The existing record types remain source-compatible. Only the dataset's
+// versioned persistence boundary chooses between legacy v2 timestamps and
+// canonical Foundation timestamps; changing a TimestampRecord field would
+// silently invalidate existing dataset consumers.
+#[derive(Serialize)]
+struct AnalysisDatasetBorrowed<'a> {
+    metadata: &'a DatasetMetadata,
+    records: &'a [DatasetRecord],
+}
+
+#[derive(Deserialize)]
+struct AnalysisDatasetOwned {
+    metadata: DatasetMetadata,
+    records: Vec<DatasetRecord>,
+}
+
+impl Serialize for AnalysisDataset {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        if self.metadata.schema_version == canonical_wire::CANONICAL_SCHEMA_VERSION {
+            canonical_wire::encode_dataset(self)
+                .map_err(S::Error::custom)?
+                .serialize(serializer)
+        } else {
+            AnalysisDatasetBorrowed {
+                metadata: &self.metadata,
+                records: &self.records,
+            }
+            .serialize(serializer)
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AnalysisDataset {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.pointer("/metadata/schema_version").and_then(serde_json::Value::as_u64)
+            == Some(u64::from(canonical_wire::CANONICAL_SCHEMA_VERSION))
+        {
+            canonical_wire::decode_dataset(value).map_err(D::Error::custom)
+        } else {
+            let wire: AnalysisDatasetOwned =
+                serde_json::from_value(value).map_err(D::Error::custom)?;
+            Ok(Self {
+                metadata: wire.metadata,
+                records: wire.records,
+            })
+        }
+    }
+}
+
 impl AnalysisDataset {
+    /// Explicitly opt into the v3 canonical rational-timestamp wire contract.
+    ///
+    /// Existing v2 datasets remain v2 when serialized or loaded unchanged.
+    /// Promotion validates timebases and refuses inconsistent derived seconds.
+    pub fn promote_to_canonical_v3(&mut self) -> std::result::Result<(), String> {
+        if self.metadata.schema_version != DATASET_SCHEMA_VERSION
+            && self.metadata.schema_version != canonical_wire::CANONICAL_SCHEMA_VERSION
+        {
+            return Err("only v2 or v3 datasets can use the canonical timestamp wire".into());
+        }
+        let previous = self.metadata.schema_version;
+        self.metadata.schema_version = canonical_wire::CANONICAL_SCHEMA_VERSION;
+        if let Err(error) = canonical_wire::encode_dataset(self) {
+            self.metadata.schema_version = previous;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     /// Creates a new value.
     pub fn new(metadata: DatasetMetadata) -> Self {
         Self {
@@ -180,6 +256,20 @@ pub enum DatasetRecord {
 }
 
 impl DatasetRecord {
+    /// Project a record onto the canonical v3 timestamp wire without changing
+    /// the in-memory v2-compatible record model.
+    pub fn canonical_v3_value(&self) -> std::result::Result<serde_json::Value, String> {
+        canonical_wire::encode_record(self)
+    }
+
+    /// Decode a v3 record (or an unchanged v2 record) through the explicit
+    /// timestamp compatibility adapter.
+    pub fn from_canonical_v3_value(
+        value: serde_json::Value,
+    ) -> std::result::Result<Self, String> {
+        canonical_wire::decode_record(value)
+    }
+
     /// Returns kind.
     pub fn kind(&self) -> &'static str {
         match self {
@@ -848,6 +938,69 @@ mod tests {
             ObservationKindRecord::from(ObservationKind::Custom("pose".to_string())),
             ObservationKindRecord::Custom("pose".to_string())
         );
+    }
+
+    #[test]
+    fn canonical_v3_roundtrip_preserves_integer_pts_without_persisted_seconds() {
+        let timestamp = Timestamp::new(i64::MAX, Timebase::new(1, 90_000));
+        let mut dataset = AnalysisDataset::empty();
+        dataset.push(DatasetRecord::Observation(ObservationRecord::from_observation(
+            Observation::new("ocr", ObservationKind::Text).at_timestamp(timestamp),
+        )));
+        dataset.promote_to_canonical_v3().unwrap();
+
+        let wire = serde_json::to_value(&dataset).unwrap();
+        assert_eq!(wire["metadata"]["schema_version"], 3);
+        assert_eq!(
+            wire["records"][0]["observation"]["timestamp"],
+            serde_json::json!({"pts": i64::MAX.to_string(), "timebase": {"num": 1, "den": 90_000}})
+        );
+        assert!(wire["records"][0]["observation"]["timestamp"]
+            .get("seconds")
+            .is_none());
+        let decoded: AnalysisDataset = serde_json::from_value(wire).unwrap();
+        assert_eq!(decoded, dataset);
+    }
+
+    #[test]
+    fn legacy_v2_timestamps_roundtrip_in_their_original_shape() {
+        let mut dataset = AnalysisDataset::empty();
+        dataset.push(DatasetRecord::Observation(ObservationRecord::from_observation(
+            Observation::new("ocr", ObservationKind::Text)
+                .at_timestamp(Timestamp::new(15, Timebase::new(1, 10))),
+        )));
+        let wire = serde_json::to_value(&dataset).unwrap();
+        assert_eq!(wire["metadata"]["schema_version"], 2);
+        let timestamp = &wire["records"][0]["observation"]["timestamp"];
+        assert_eq!(timestamp["timebase_den"], 10);
+        assert_eq!(timestamp["seconds"], 1.5);
+        assert_eq!(serde_json::from_value::<AnalysisDataset>(wire).unwrap(), dataset);
+    }
+
+    #[test]
+    fn v3_migration_rejects_divergent_legacy_seconds() {
+        let mut dataset = AnalysisDataset::empty();
+        let mut record = TimestampRecord::from(Timestamp::new(15, Timebase::new(1, 10)));
+        record.seconds = 999.0;
+        dataset.push(DatasetRecord::Observation(ObservationRecord {
+            timestamp: Some(record),
+            ..ObservationRecord::from_observation(Observation::new("ocr", ObservationKind::Text))
+        }));
+
+        assert!(dataset.promote_to_canonical_v3().is_err());
+        assert_eq!(dataset.metadata.schema_version, 2);
+    }
+
+    #[test]
+    fn v3_deserialization_rejects_legacy_timestamp_shapes() {
+        let mut dataset = AnalysisDataset::empty();
+        dataset.push(DatasetRecord::Observation(ObservationRecord::from_observation(
+            Observation::new("ocr", ObservationKind::Text)
+                .at_timestamp(Timestamp::new(4, Timebase::new(1, 24))),
+        )));
+        let mut wire = serde_json::to_value(dataset).unwrap();
+        wire["metadata"]["schema_version"] = 3.into();
+        assert!(serde_json::from_value::<AnalysisDataset>(wire).is_err());
     }
 
     #[test]

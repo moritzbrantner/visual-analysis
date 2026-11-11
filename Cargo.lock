@@ -1981,6 +1981,7 @@ dependencies = [
 name = "moenarch-video-analysis-dataset"
 version = "0.1.0"
 dependencies = [
+ "moenarch-media-core 0.2.0",
  "moenarch-runtime-core",
  "moenarch-video-analysis-core",
  "num-rational",
