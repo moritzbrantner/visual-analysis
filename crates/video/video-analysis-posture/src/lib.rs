@@ -1561,8 +1561,7 @@ fn decode_pose_lift_tensor(
         ));
     }
     let mut frames = Vec::with_capacity(frame_count);
-    for frame_index in 0..frame_count {
-        let source_pose = &source.frames[frame_index];
+    for (frame_index, source_pose) in source.frames.iter().enumerate() {
         if source_pose.keypoints.len() != joint_count {
             return Err(invalid_argument(format!(
                 "ONNX pose lift output joint count {joint_count} does not match input joint count {}",
@@ -1570,9 +1569,8 @@ fn decode_pose_lift_tensor(
             )));
         }
         let mut keypoints = Vec::with_capacity(joint_count);
-        for joint_index in 0..joint_count {
+        for (joint_index, source_keypoint) in source_pose.keypoints.iter().enumerate() {
             let start = (frame_index * joint_count + joint_index) * 3;
-            let source_keypoint = &source_pose.keypoints[joint_index];
             keypoints.push(Keypoint3d::new(
                 source_keypoint.name.clone(),
                 Point3::new(
