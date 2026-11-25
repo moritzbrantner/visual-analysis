@@ -42,8 +42,12 @@ jobs:
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
-      - name: Install wasm-pack
-        run: cargo install wasm-pack --locked --version 0.14.0
+      # Official publisher release, digest-verified at download; fails closed instead of compiling from source.
+      - name: Install verified wasm-pack
+        uses: moritzbrantner/reusable-workflows/.github/actions/install-verified-wasm-cli@f17cd13868ab7d956b9e8a9afae926a84b368d0d
+        with:
+          tool: wasm-pack
+          version: "0.14.0"
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
